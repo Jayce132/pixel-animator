@@ -3,6 +3,36 @@ import { useEditor } from '../../contexts/EditorContext';
 import { calculateLassoSelection } from '../../utils/lasso';
 import { getLinePixels } from '../../utils/draw';
 
+interface PixelProps {
+    index: number;
+    color: string | null;
+    isSelected: boolean;
+    isFloating: boolean;
+    isStamping: boolean;
+    onMouseDown: (index: number) => void;
+    onMouseEnter: (index: number) => void;
+    onMouseUp: () => void;
+}
+
+const MemoizedPixel: React.FC<PixelProps> = React.memo(({
+    index,
+    color,
+    isSelected,
+    isFloating,
+    isStamping,
+    onMouseDown,
+    onMouseEnter,
+    onMouseUp
+}) => (
+    <div
+        className={`pixel ${color ? 'has-color' : ''} ${isSelected ? 'is-selected' : ''} ${isFloating ? 'is-floating' : ''} ${isStamping && isFloating ? 'stamping' : ''}`}
+        style={color ? { backgroundColor: color, '--pixel-color': color } as React.CSSProperties : undefined}
+        onMouseDown={() => onMouseDown(index)}
+        onMouseEnter={() => onMouseEnter(index)}
+        onMouseUp={onMouseUp}
+    />
+));
+
 export const Editor: React.FC = () => {
     const editorContainerRef = useRef<HTMLDivElement>(null);
     // Track if drag started inside or outside selection to mask cursor visibility
@@ -325,12 +355,15 @@ export const Editor: React.FC = () => {
                     const color = floatingLayer.has(index) ? floatingLayer.get(index)! : baseColor;
                     const isFloating = floatingLayer.has(index);
                     return (
-                        <div
+                        <MemoizedPixel
                             key={index}
-                            className={`pixel ${color ? 'has-color' : ''} ${selectedPixels.has(index) ? 'is-selected' : ''} ${isFloating ? 'is-floating' : ''} ${isStamping && isFloating ? 'stamping' : ''}`}
-                            style={color ? { backgroundColor: color, '--pixel-color': color } as React.CSSProperties : undefined}
-                            onMouseDown={() => handleMouseDown(index)}
-                            onMouseEnter={() => handleMouseEnter(index)}
+                            index={index}
+                            color={color}
+                            isSelected={selectedPixels.has(index)}
+                            isFloating={isFloating}
+                            isStamping={isStamping}
+                            onMouseDown={handleMouseDown}
+                            onMouseEnter={handleMouseEnter}
                             onMouseUp={handleMouseUp}
                         />
                     );

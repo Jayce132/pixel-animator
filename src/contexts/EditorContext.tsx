@@ -42,6 +42,8 @@ interface EditorContextType {
     importMultipleFromJSON: (files: { name: string; pixels: (string | null)[] }[]) => void;
     stamp: () => void;
     isStamping: boolean;
+    fps: number;
+    setFps: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
@@ -66,6 +68,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [isPlaying, setIsPlaying] = useState(false);
     const [isOnionSkinning, setIsOnionSkinning] = useState(false);
     const [isStamping, setIsStamping] = useState(false);
+    const [fps, setFps] = useState(8);
 
     // Helper to save history
     const saveHistory = useCallback((currentSprites: Sprite[], spriteId: number) => {
@@ -630,22 +633,39 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }, []);
 
     // Animation Playback
+    // Animation Playback with RAF
+    const lastFrameTimeRef = useRef<number>(0);
+    const requestRef = useRef<number | undefined>(undefined);
+
+    const animate = useCallback((time: number) => {
+        if (!lastFrameTimeRef.current) lastFrameTimeRef.current = time;
+        const deltaTime = time - lastFrameTimeRef.current;
+        const targetInterval = 1000 / fps;
+
+        if (deltaTime >= targetInterval) {
+            setActiveSpriteId(prevActiveId => {
+                const currentIndex = sprites.findIndex(s => s.id === prevActiveId);
+                if (currentIndex === -1) return sprites[0].id;
+                const nextIndex = (currentIndex + 1) % sprites.length;
+                return sprites[nextIndex].id;
+            });
+            // Adjust for drift, keeping remainder
+            lastFrameTimeRef.current = time - (deltaTime % targetInterval);
+        }
+        requestRef.current = requestAnimationFrame(animate);
+    }, [fps, sprites]);
+
     useEffect(() => {
-        let interval: any;
         if (isPlaying && sprites.length > 1) {
-            interval = setInterval(() => {
-                setActiveSpriteId(prevActiveId => {
-                    const currentIndex = sprites.findIndex(s => s.id === prevActiveId);
-                    if (currentIndex === -1) return sprites[0].id;
-                    const nextIndex = (currentIndex + 1) % sprites.length;
-                    return sprites[nextIndex].id;
-                });
-            }, 125); // 8 FPS (1000/8 = 125ms)
+            lastFrameTimeRef.current = 0;
+            requestRef.current = requestAnimationFrame(animate);
+        } else {
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
         }
         return () => {
-            if (interval) clearInterval(interval);
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
-    }, [isPlaying, sprites]);
+    }, [isPlaying, animate, sprites.length]);
 
     const handleSetCurrentColor = useCallback((color: string) => {
         setCurrentColor(color);
@@ -767,7 +787,9 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 setIsOnionSkinning,
                 importMultipleFromJSON,
                 stamp,
-                isStamping
+                isStamping,
+                fps,
+                setFps
             }}
         >
             {children}

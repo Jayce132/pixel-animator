@@ -148,6 +148,18 @@ body {
     transform: scale(0.95);
 }
 
+/* Timeline Header */
+.timeline-header {
+    width: 100%;
+    max-width: 512px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 0 4px;
+    /* Slight alignment correction */
+}
+
 /* Timeline */
 .timeline-section {
     width: 100%;
@@ -272,14 +284,14 @@ body {
     pointer-events: none;
     z-index: 9999;
     width: var(--frame-size);
-    /* Match timeline frame size */
+    /* Big square frame size */
     aspect-ratio: 1;
     opacity: 0.8;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
     border: 2px solid var(--accent-color);
     background: var(--panel-bg);
-    transform: translate(-30%, -30%);
-    /* Offset slightly from cursor for visibility */
+    transform: translate(-50%, -50%);
+    /* Center on cursor */
 }
 
 .drag-ghost .frame-preview {

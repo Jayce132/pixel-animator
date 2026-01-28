@@ -5,38 +5,42 @@ import type { Sprite } from '../../types';
 interface TimelineFrameProps {
     sprite: Sprite;
     isActive: boolean;
-    onClick: () => void;
+    onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
     index: number;
     isAdd?: boolean;
     isDragging?: boolean;
     isDeletePending?: boolean;
+    isInBatch?: boolean;
     onDragStart?: (e: React.DragEvent, index: number) => void;
     onDragEnd?: (e: React.DragEvent) => void;
     onDragOver?: (e: React.DragEvent, index: number) => void;
     onDrop?: (e: React.DragEvent) => void;
-    style?: React.CSSProperties;
 }
 
 export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     sprite,
     isActive,
-    onClick,
+    onMouseDown,
     index,
     isAdd,
     isDragging,
     isDeletePending,
+    isInBatch = true,
     onDragStart,
     onDragEnd,
     onDragOver,
-    onDrop,
-    style
+    onDrop
 }) => {
     return (
         <div
             className={`timeline-frame ${isActive && !isAdd ? 'active' : ''} ${isAdd ? 'add-new' : ''} ${isDragging ? 'dragging' : ''} ${isDeletePending ? 'delete-pending' : ''}`}
-            onClick={onClick}
+            onMouseDown={(e) => onMouseDown(e, index, sprite)}
             title={isAdd ? 'Duplicate Selected Frame' : sprite.name}
-            style={{ position: 'relative', ...style }}
+            style={{
+                position: 'relative',
+                opacity: isInBatch ? 1 : 0.4,
+                transition: 'opacity 0.2s'
+            }}
             draggable={!isAdd}
             onDragStart={(e) => onDragStart?.(e, index)}
             onDragEnd={onDragEnd}

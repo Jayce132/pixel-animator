@@ -16,8 +16,29 @@ export const Timeline: React.FC = () => {
         setIsPlaying,
         isOnionSkinning,
         setIsOnionSkinning,
-        importMultipleFromJSON
+        importMultipleFromJSON,
+        fps,
+        setFps
     } = useEditor();
+
+    // Stable handler for frame clicks to prevent re-renders
+    const handleFrameMouseDown = React.useCallback((e: React.MouseEvent, index: number, sprite: any) => {
+        setIsPlaying(false);
+        const targetBatch = Math.floor(index / 8);
+        // We need access to currentBatch state, pass updater or check it
+        // To keep handler stable we might need ref for currentBatch or use setState form
+        // But BATCH_SIZE is 8 const.
+        setCurrentBatch(prev => {
+            if (targetBatch !== prev) return targetBatch;
+            return prev;
+        });
+        setActiveSpriteId(sprite.id);
+    }, [setIsPlaying, setActiveSpriteId]);
+
+    const handleAddFrameMouseDown = React.useCallback(() => {
+        setIsPlaying(false);
+        duplicateSprite();
+    }, [setIsPlaying, duplicateSprite]);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -127,13 +148,15 @@ export const Timeline: React.FC = () => {
     const draggedIndexRef = React.useRef<number | null>(null);
     const isDeletePendingRef = React.useRef(false);
     const spritesRef = React.useRef(sprites);
+    const activeSpriteIdRef = React.useRef(activeSpriteId);
     const ghostRef = React.useRef<HTMLDivElement>(null);
     const timelineRef = React.useRef<HTMLDivElement>(null);
 
     // Sync refs with state
     React.useEffect(() => {
         spritesRef.current = sprites;
-    }, [sprites]);
+        activeSpriteIdRef.current = activeSpriteId;
+    }, [sprites, activeSpriteId]);
 
     const [currentBatch, setCurrentBatch] = React.useState(0);
     const BATCH_SIZE = 8;
@@ -151,6 +174,26 @@ export const Timeline: React.FC = () => {
                 activeElement?.hasAttribute('contenteditable');
 
             if (isInput) return;
+
+            // Frame Navigation: < (,) and > (.)
+            if (e.key === ',' || e.key === '<') {
+                const currentId = activeSpriteIdRef.current;
+                const idx = spritesRef.current.findIndex(s => s.id === currentId);
+                if (idx !== -1) {
+                    const count = spritesRef.current.length;
+                    const prevIdx = (idx - 1 + count) % count;
+                    setActiveSpriteId(spritesRef.current[prevIdx].id);
+                }
+            }
+            if (e.key === '.' || e.key === '>') {
+                const currentId = activeSpriteIdRef.current;
+                const idx = spritesRef.current.findIndex(s => s.id === currentId);
+                if (idx !== -1) {
+                    const count = spritesRef.current.length;
+                    const nextIdx = (idx + 1) % count;
+                    setActiveSpriteId(spritesRef.current[nextIdx].id);
+                }
+            }
 
             // Map keys '1' through '8' relative to batch
             if (/^[1-8]$/.test(e.key)) {
@@ -195,30 +238,49 @@ export const Timeline: React.FC = () => {
     }, [setActiveSpriteId, currentBatch]); // Re-bind when batch changes
 
     // Auto-scroll to active sprite
+    const prevActiveIdRef = React.useRef(activeSpriteId);
+
     React.useEffect(() => {
-        const activeElement = document.querySelector('.timeline-frame.active');
-        if (activeElement) {
-            activeElement.scrollIntoView({
-                behavior: isPlaying ? 'auto' : 'smooth',
-                block: 'nearest',
-                inline: 'center'
+        const container = timelineRef.current?.querySelector('.timeline-frame-list') as HTMLElement;
+
+        if (container) {
+            const index = sprites.findIndex(s => s.id === activeSpriteId);
+            if (index === -1) return;
+
+            // Mathematical scroll calculation (No layout reflow needed)
+            // Use 100 for desktop, 75 for mobile (match index.css)
+            const isSmall = window.innerWidth <= 1024;
+            const FRAME_SIZE = isSmall ? 75 : 100;
+
+            const listWidth = container.clientWidth;
+            // The spacer at the start is 50% - FRAME_SIZE/2
+            const spacerWidth = (listWidth / 2) - (FRAME_SIZE / 2);
+
+            // Total distance from start of list: spacers + frames before it
+            const targetScroll = (index * FRAME_SIZE) + (FRAME_SIZE / 2) - (listWidth / 2) + spacerWidth;
+
+            // Direct DOM manipulation for maximum speed
+            container.scrollTo({
+                left: targetScroll,
+                behavior: isPlaying ? 'auto' : 'smooth'
             });
         }
-    }, [activeSpriteId, isPlaying]); // Run whenever active sprite or playback state changes
+        prevActiveIdRef.current = activeSpriteId;
+    }, [activeSpriteId, isPlaying, sprites.length]); // sprites.length for add/delete updates
 
-    // Auto-switch batch when new frame is added (e.g. 9th frame)
+    // Auto-switch batch when new frame is added OR when active frame changes (e.g. playback)
+    // This ensures the current batch always matches the active frame
     React.useEffect(() => {
-        const lastIndex = sprites.length - 1;
-        if (lastIndex > 0) {
-            const targetBatch = Math.floor(lastIndex / BATCH_SIZE);
-            // Verify if we just crossed a boundary or if current batch is behind
-            if (targetBatch > currentBatch) {
-                setCurrentBatch(targetBatch);
-                // We should likely ensure the new frame is selected, but `addSprite` usually handles selection.
-                // This ensures the view follows it.
+        const index = sprites.findIndex(s => s.id === activeSpriteId);
+        if (index !== -1) {
+            const batch = Math.floor(index / BATCH_SIZE);
+            if (batch !== currentBatch) {
+                // If we are playing, the scroll logic handles the view.
+                // We just need to update state so opacity is correct.
+                setCurrentBatch(batch);
             }
         }
-    }, [sprites.length, BATCH_SIZE]); // Run when count changes
+    }, [activeSpriteId, sprites, currentBatch, BATCH_SIZE]);
 
     // ... (drag handlers restored below)
 
@@ -297,31 +359,34 @@ export const Timeline: React.FC = () => {
         e.preventDefault();
     };
 
-    const handlePrevBatch = () => {
-        setCurrentBatch(prev => {
-            const newBatch = Math.max(0, prev - 1);
-            const firstIdx = newBatch * BATCH_SIZE;
-            if (sprites[firstIdx]) {
-                setActiveSpriteId(sprites[firstIdx].id);
-            }
-            return newBatch;
-        });
-    };
 
-    const handleNextBatch = () => {
-        setCurrentBatch(prev => {
-            const maxBatch = Math.floor((sprites.length - 1) / BATCH_SIZE);
-            const newBatch = Math.min(prev + 1, maxBatch);
+    // FPS Rapid Adjustment
+    const fpsIntervalRef = React.useRef<any>(null);
+    const fpsTimeoutRef = React.useRef<any>(null);
 
-            if (newBatch !== prev) {
-                const firstIdx = newBatch * BATCH_SIZE;
-                if (sprites[firstIdx]) {
-                    setActiveSpriteId(sprites[firstIdx].id);
-                }
-            }
-            return newBatch;
-        });
-    };
+    const stopFpsChange = React.useCallback(() => {
+        if (fpsIntervalRef.current) {
+            clearInterval(fpsIntervalRef.current);
+            fpsIntervalRef.current = null;
+        }
+        if (fpsTimeoutRef.current) {
+            clearTimeout(fpsTimeoutRef.current);
+            fpsTimeoutRef.current = null;
+        }
+    }, []);
+
+    const startFpsChange = React.useCallback((delta: number) => {
+        // Immediate change
+        setFps(prev => Math.max(1, Math.min(60, prev + delta)));
+
+        // Delay before rapid change
+        fpsTimeoutRef.current = setTimeout(() => {
+            fpsIntervalRef.current = setInterval(() => {
+                setFps(prev => Math.max(1, Math.min(60, prev + delta)));
+            }, 80); // Fast repeat (80ms)
+        }, 400); // Initial delay (400ms)
+    }, [setFps]);
+
 
     return (
         <div
@@ -346,37 +411,12 @@ export const Timeline: React.FC = () => {
                         index={draggedIndex}
                         isActive={false}
                         isDeletePending={isDeletePending}
-                        onClick={() => { }}
+                        onMouseDown={() => { }}
                     />
                 </div>
             )}
             <div className="timeline-header">
                 <div className="timeline-controls-left">
-                    <button
-                        className="control-btn-small"
-                        onClick={handlePrevBatch}
-                        disabled={currentBatch === 0}
-                        title="Previous Batch (Shortcut: 9)"
-                        style={{
-                            opacity: currentBatch === 0 ? 0 : 1,
-                            visibility: currentBatch === 0 ? 'hidden' : 'visible'
-                        }}
-                    >
-                        &lt;
-                    </button>
-                    <span className="timeline-title">BATCH {currentBatch + 1}</span>
-                    <button
-                        className="control-btn-small"
-                        onClick={handleNextBatch}
-                        disabled={currentBatch >= Math.floor((sprites.length - 1) / BATCH_SIZE)}
-                        title="Next Batch (Shortcut: 0)"
-                        style={{
-                            opacity: currentBatch >= Math.floor((sprites.length - 1) / BATCH_SIZE) ? 0 : 1,
-                            visibility: currentBatch >= Math.floor((sprites.length - 1) / BATCH_SIZE) ? 'hidden' : 'visible'
-                        }}
-                    >
-                        &gt;
-                    </button>
                     <button
                         className={`control-btn-small ${isPlaying ? 'active' : ''}`}
                         onClick={() => setIsPlaying(!isPlaying)}
@@ -408,6 +448,36 @@ export const Timeline: React.FC = () => {
 
             <div className="timeline-frame-list" style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
                 <div className="timeline-spacer" />
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 8px',
+                    color: '#888',
+                    fontSize: '0.8rem',
+                    gap: '4px',
+                    height: '100%'
+                }}>
+                    <button
+                        className="secondary-btn-small"
+                        onMouseDown={() => startFpsChange(-1)}
+                        onMouseUp={stopFpsChange}
+                        onMouseLeave={stopFpsChange}
+                        style={{ padding: '2px 4px', minWidth: '20px' }}
+                    >
+                        &lt;
+                    </button>
+                    <span style={{ minWidth: '45px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{fps} FPS</span>
+                    <button
+                        className="secondary-btn-small"
+                        onMouseDown={() => startFpsChange(1)}
+                        onMouseUp={stopFpsChange}
+                        onMouseLeave={stopFpsChange}
+                        style={{ padding: '2px 4px', minWidth: '20px' }}
+                    >
+                        &gt;
+                    </button>
+                </div>
                 {sprites.map((sprite, index) => {
                     const isInBatch = index >= currentBatch * BATCH_SIZE && index < (currentBatch + 1) * BATCH_SIZE;
                     return (
@@ -416,20 +486,14 @@ export const Timeline: React.FC = () => {
                             index={index}
                             sprite={sprite}
                             isActive={sprite.id === activeSpriteId}
-                            onClick={() => {
-                                const targetBatch = Math.floor(index / BATCH_SIZE);
-                                if (targetBatch !== currentBatch) {
-                                    setCurrentBatch(targetBatch);
-                                }
-                                setActiveSpriteId(sprite.id);
-                            }}
+                            onMouseDown={handleFrameMouseDown}
                             onDragStart={handleDragStart}
                             onDragEnd={handleDragEnd}
                             onDragOver={handleDragOver}
                             onDrop={handleDrop}
                             isDragging={index === draggedIndex}
                             isDeletePending={index === draggedIndex && isDeletePending}
-                            style={{ opacity: isInBatch ? 1 : 0.4, transition: 'all 0.2s' }}
+                            isInBatch={isInBatch}
                         />
                     );
                 })}
@@ -440,7 +504,7 @@ export const Timeline: React.FC = () => {
                         isAdd={true}
                         index={sprites.length}
                         isActive={false}
-                        onClick={duplicateSprite}
+                        onMouseDown={handleAddFrameMouseDown}
                     />
                 )}
                 <div className="timeline-spacer" />
