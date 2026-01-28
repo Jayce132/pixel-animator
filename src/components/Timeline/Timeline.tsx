@@ -1,6 +1,7 @@
 import React from 'react';
 import { useEditor } from '../../contexts/EditorContext';
 import { TimelineFrame } from './TimelineFrame';
+import { GRID_SIZE } from '../../types';
 
 export const Timeline: React.FC = () => {
     const {
@@ -45,17 +46,17 @@ export const Timeline: React.FC = () => {
     const handleExportPNG = () => {
         if (!activeSprite) return;
 
-        // Create 16x16 canvas
+        // Create 32x32 canvas (or whatever GRID_SIZE is)
         const canvas = document.createElement('canvas');
-        canvas.width = 16;
-        canvas.height = 16;
+        canvas.width = GRID_SIZE;
+        canvas.height = GRID_SIZE;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
         activeSprite.pixelData.forEach((color, i) => {
             if (color) {
-                const x = i % 16; // Using hardcoded 16 for clarity or import GRID_SIZE
-                const y = Math.floor(i / 16);
+                const x = i % GRID_SIZE;
+                const y = Math.floor(i / GRID_SIZE);
                 ctx.fillStyle = color;
                 ctx.fillRect(x, y, 1, 1);
             }
@@ -83,8 +84,8 @@ export const Timeline: React.FC = () => {
         if (!activeSprite) return;
 
         const jsonData = {
-            width: 16,
-            height: 16,
+            width: GRID_SIZE,
+            height: GRID_SIZE,
             pixels: activeSprite.pixelData
         };
 

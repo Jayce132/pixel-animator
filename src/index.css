@@ -176,6 +176,7 @@ body {
 /* Timeline Frame Sizing Variable */
 :root {
     --frame-size: 100px;
+    --grid-size: 32;
 }
 
 @media (max-width: 1024px) {
@@ -538,8 +539,8 @@ body {
 
 .pixel-grid {
     display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    grid-template-rows: repeat(16, 1fr);
+    grid-template-columns: repeat(var(--grid-size), 1fr);
+    grid-template-rows: repeat(var(--grid-size), 1fr);
     width: 100%;
     aspect-ratio: 1;
     background-image:
@@ -562,10 +563,11 @@ body {
     user-select: none;
 }
 
-.pixel:hover {
+/* Hover effect handled by JS Custom Cursor now */
+/* .pixel:hover {
     border: 1px solid rgba(255, 255, 255, 0.3);
     z-index: 10;
-}
+} */
 
 .canvas-info {
     margin-top: 16px;
@@ -1091,8 +1093,8 @@ body {
 
 .main-sprite-editor {
     display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    grid-template-rows: repeat(16, 1fr);
+    grid-template-columns: repeat(var(--grid-size), 1fr);
+    grid-template-rows: repeat(var(--grid-size), 1fr);
     gap: 1px;
     background: var(--grid-line);
     border: 2px solid var(--panel-border);
@@ -1235,8 +1237,8 @@ body {
 
 .timeline-frame-grid {
     display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    grid-template-rows: repeat(16, 1fr);
+    grid-template-columns: repeat(var(--grid-size), 1fr);
+    grid-template-rows: repeat(var(--grid-size), 1fr);
     gap: 0;
     /* Keep gap 0 for internal pixels as requested likely implies packed grid */
     width: 100%;

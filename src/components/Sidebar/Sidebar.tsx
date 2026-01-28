@@ -12,7 +12,9 @@ export const Sidebar: React.FC = () => {
         redo,
         clearCanvas,
         selectedPixels,
-        clearSelection
+        clearSelection,
+        brushSize,
+        setBrushSize
     } = useEditor();
 
     return (
@@ -31,13 +33,33 @@ export const Sidebar: React.FC = () => {
                             // If we have a selection, this button acts as Deselect
                             clearSelection();
                         } else {
-                            setTool('select');
+                            setTool(currentTool === 'select' ? 'brush' : 'select');
                         }
                     }}
                 >
                     {selectedPixels.size > 0 ? 'Deselect' : 'Select'}
                 </button>
             </div>
+
+            {/* Brush Size Controls */}
+            {(currentTool === 'brush' || currentTool === 'eraser') && (
+                <div className="tool-group" style={{ flexDirection: 'row', gap: '4px' }}>
+                    <button
+                        className={`tool-btn ${brushSize === 1 ? 'active' : ''}`}
+                        onClick={() => setBrushSize(1)}
+                        style={{ fontSize: '0.8rem' }}
+                    >
+                        1x
+                    </button>
+                    <button
+                        className={`tool-btn ${brushSize === 2 ? 'active' : ''}`}
+                        onClick={() => setBrushSize(2)}
+                        style={{ fontSize: '0.8rem' }}
+                    >
+                        2x
+                    </button>
+                </div>
+            )}
 
             <div className="action-group">
                 <button className="action-btn" onClick={undo}>Undo</button>

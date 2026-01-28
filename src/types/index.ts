@@ -10,7 +10,7 @@ export interface Sprite {
 
 export type Tool = 'brush' | 'eraser' | 'fill' | 'select';
 
-export const GRID_SIZE = 16;
+export const GRID_SIZE = 32;
 export const TOTAL_PIXELS = GRID_SIZE * GRID_SIZE;
 
 export const PRESET_COLORS = [

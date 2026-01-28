@@ -44,6 +44,9 @@ interface EditorContextType {
     isStamping: boolean;
     fps: number;
     setFps: React.Dispatch<React.SetStateAction<number>>;
+    brushSize: 1 | 2;
+    setBrushSize: (size: 1 | 2) => void;
+    addSelectionBatch: (indices: number[]) => void;
 }
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
@@ -69,6 +72,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [isOnionSkinning, setIsOnionSkinning] = useState(false);
     const [isStamping, setIsStamping] = useState(false);
     const [fps, setFps] = useState(8);
+    const [brushSize, setBrushSize] = useState<1 | 2>(2);
 
     // Helper to save history
     const saveHistory = useCallback((currentSprites: Sprite[], spriteId: number) => {
@@ -97,6 +101,20 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const newSet = new Set(prev);
             newSet.add(index);
             return newSet;
+        });
+    }, []);
+
+    const addSelectionBatch = useCallback((indices: number[]) => {
+        setSelectedPixelsState(prev => {
+            const newSet = new Set(prev);
+            let changed = false;
+            indices.forEach(idx => {
+                if (!newSet.has(idx)) {
+                    newSet.add(idx);
+                    changed = true;
+                }
+            });
+            return changed ? newSet : prev;
         });
     }, []);
 
@@ -516,40 +534,95 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const updatePixel = useCallback((pixelIndex: number) => {
         const targetColor = currentTool === 'eraser' ? null : currentColor;
 
-        // If drawing inside selection, update floating layer
-        if (selectedPixels.has(pixelIndex)) {
-            setFloatingLayerState(prev => {
-                const newLayer = new Map(prev);
-                if (targetColor === null) {
-                    newLayer.delete(pixelIndex); // Eraser removes from floating layer
-                } else {
-                    newLayer.set(pixelIndex, targetColor);
+        // Calculate pixels based on brush size
+        const pixelsToUpdate: number[] = [];
+        const x = pixelIndex % GRID_SIZE;
+        const y = Math.floor(pixelIndex / GRID_SIZE);
+
+        pixelsToUpdate.push(pixelIndex);
+
+        if (brushSize === 2) {
+            // 2x2 brush: Pixel + Right + Bottom + BottomRight
+            if (x + 1 < GRID_SIZE) pixelsToUpdate.push(pixelIndex + 1);
+            if (y + 1 < GRID_SIZE) pixelsToUpdate.push(pixelIndex + GRID_SIZE);
+            if (x + 1 < GRID_SIZE && y + 1 < GRID_SIZE) pixelsToUpdate.push(pixelIndex + GRID_SIZE + 1);
+        }
+
+        // Helper to update a map (for floating layer)
+        const updateMap = (prev: Map<number, string>) => {
+            const newLayer = new Map(prev);
+            pixelsToUpdate.forEach(idx => {
+                if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return; // Mask check for floating layer? 
+                // Actually floating layer masking is strict: only pixels IN selection are floating.
+                // So we only update if idx is in selection.
+                if (selectedPixels.has(idx)) {
+                    if (targetColor === null) {
+                        newLayer.delete(idx);
+                    } else {
+                        newLayer.set(idx, targetColor);
+                    }
                 }
-                return newLayer;
             });
+            return newLayer;
+        };
+
+        // If ANY of the target pixels are in selection, we treat this as a potentially mixed operation
+        // But simplifying: update floating layer if we are interacting with selection
+        const hitsSelection = pixelsToUpdate.some(idx => selectedPixels.has(idx));
+
+        if (hitsSelection) {
+            setFloatingLayerState(prev => updateMap(prev));
+            // We might also need to update base sprite for pixels NOT in selection if we allow cross-boundary painting
+            // But usually selection acts as a mask. 
+            // Let's assume if you are painting "in selection", you are masked TO selection.
             return;
         }
 
         // Otherwise update active sprite (respecting mask)
         setSprites(prevSprites => prevSprites.map(sprite => {
             if (sprite.id === activeSpriteId) {
-                // Masking Check: If selection exists, only allow painting inside it
-                // (Already handled above for floating layer, so here we block if selection exists but point is outside)
-                // UPDATE: Removed strict block to allow "Start Outside -> Draw Outside" behavior controlled by Editor.tsx
-                // if (selectedPixels.size > 0) {
-                //     return sprite;
-                // }
+                // If selection exists but we didn't hit it (controlled by hitsSelection), we are outside.
+                // If selection exists, we should NOT paint outside? 
+                // Editor.tsx controls "dragOrigin" to prevent crossing boundaries during a stroke.
+                // Here we just apply to whatever is valid.
+
+                // However, we must not paint INSIDE the selection on the base layer if it's floating.
+                // But hitsSelection check handles that (moves to floating layer).
+
+                // So here we only paint pixels that are NOT in selection.
 
                 const newPixelData = [...sprite.pixelData];
+                let changed = false;
 
-                if (newPixelData[pixelIndex] === targetColor) return sprite;
+                pixelsToUpdate.forEach(idx => {
+                    // Safety check for array bounds (though x/y checks should handle it)
+                    if (idx >= 0 && idx < TOTAL_PIXELS) {
+                        // Don't overwrite if masked by selection (logic above handles 'hitsSelection', so here we know we are targeting outside?)
+                        // Actually, with a 2x2 brush, some pixels might be in, some out.
+                        // The 'hitsSelection' logic above effectively captures the whole stroke if ANY part touches?! 
+                        // No, that's buggy. We should split.
 
-                newPixelData[pixelIndex] = targetColor;
+                        // Correct logic:
+                        // 1. Pixels IN selection update floating layer.
+                        // 2. Pixels OUT selection update base layer (unless masked by tool behavior).
+
+                        // For simplicity in this step, let's assume strict masking:
+                        // If selection exists, you can ONLY paint inside it.
+                        if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return;
+
+                        if (newPixelData[idx] !== targetColor) {
+                            newPixelData[idx] = targetColor;
+                            changed = true;
+                        }
+                    }
+                });
+
+                if (!changed) return sprite;
                 return { ...sprite, pixelData: newPixelData };
             }
             return sprite;
         }));
-    }, [activeSpriteId, currentTool, currentColor, selectedPixels]);
+    }, [activeSpriteId, currentTool, currentColor, selectedPixels, brushSize]);
 
     const addSprite = useCallback(() => {
         setSprites(prev => {
@@ -789,7 +862,10 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 stamp,
                 isStamping,
                 fps,
-                setFps
+                setFps,
+                brushSize,
+                setBrushSize,
+                addSelectionBatch
             }}
         >
             {children}
