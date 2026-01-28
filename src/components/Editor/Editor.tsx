@@ -26,7 +26,8 @@ export const Editor: React.FC = () => {
         isOnionSkinning,
         sprites,
         activeSpriteId,
-        currentColor
+        currentColor,
+        isStamping
     } = useEditor();
 
     const activeSpriteIndex = sprites.findIndex(s => s.id === activeSpriteId);
@@ -221,18 +222,24 @@ export const Editor: React.FC = () => {
 
     const handleMouseEnter = (index: number) => {
         if (isDrawing) {
-            // Optimization: If masked (drag started 'inside' but now 'outside', or vice-versa),
-            // prevent updates to stop re-renders and blinking.
-            // Also use direct DOM manipulation for cursor to bypass React render cycle latency.
+            // Optimization & Constraint:
+            // If masked (drag started 'inside' but now 'outside', or vice-versa),
+            // update cursor visuals.
             const isMasked = (dragOrigin === 'inside' && !selectedPixels.has(index)) ||
                 (dragOrigin === 'outside' && selectedPixels.has(index));
 
             if (isMasked) {
                 if (editorContainerRef.current) editorContainerRef.current.classList.add('cursor-masked');
-                return;
             } else {
                 if (editorContainerRef.current) editorContainerRef.current.classList.remove('cursor-masked');
             }
+
+            // Helper to check if a specific pixel can be painted based on start origin
+            const canPaint = (idx: number) => {
+                if (dragOrigin === 'inside') return selectedPixels.has(idx);
+                if (dragOrigin === 'outside') return !selectedPixels.has(idx);
+                return true;
+            };
 
             if (currentTool === 'select') {
                 if (lastPixelIndexRef.current !== null && lastPixelIndexRef.current !== index) {
@@ -248,11 +255,15 @@ export const Editor: React.FC = () => {
             // Interpolate line from last pixel to current
             if (lastPixelIndexRef.current !== null && lastPixelIndexRef.current !== index) {
                 const pixels = getLinePixels(lastPixelIndexRef.current, index);
-                pixels.forEach(idx => updatePixel(idx));
+                pixels.forEach(idx => {
+                    if (canPaint(idx)) updatePixel(idx);
+                });
             } else {
-                updatePixel(index);
+                if (canPaint(index)) updatePixel(index);
             }
 
+            // Always update last position so the line 'follows' even through masks
+            // This prevents "slashing" artifacts if you exit and re-enter a valid zone
             lastPixelIndexRef.current = index;
         }
     };
@@ -312,10 +323,11 @@ export const Editor: React.FC = () => {
                 {/* Main Sprite Layer */}
                 {activeSprite.pixelData.map((baseColor, index) => {
                     const color = floatingLayer.has(index) ? floatingLayer.get(index)! : baseColor;
+                    const isFloating = floatingLayer.has(index);
                     return (
                         <div
                             key={index}
-                            className={`pixel ${color ? 'has-color' : ''} ${selectedPixels.has(index) ? 'is-selected' : ''}`}
+                            className={`pixel ${color ? 'has-color' : ''} ${selectedPixels.has(index) ? 'is-selected' : ''} ${isFloating ? 'is-floating' : ''} ${isStamping && isFloating ? 'stamping' : ''}`}
                             style={color ? { backgroundColor: color, '--pixel-color': color } as React.CSSProperties : undefined}
                             onMouseDown={() => handleMouseDown(index)}
                             onMouseEnter={() => handleMouseEnter(index)}

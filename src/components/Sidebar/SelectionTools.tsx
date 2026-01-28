@@ -6,8 +6,22 @@ export const SelectionTools: React.FC = () => {
         flipSelectionHorizontal,
         flipSelectionVertical,
         rotateSelectionLeft,
-        rotateSelectionRight
+        rotateSelectionRight,
+        stamp,
+        isStamping
     } = useEditor();
+
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                stamp();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [stamp]);
 
     return (
         <div className="palette-section">
@@ -17,6 +31,16 @@ export const SelectionTools: React.FC = () => {
                 <button className="action-btn" title="Flip Vertical (V)" onClick={flipSelectionVertical}>Flip V</button>
                 <button className="action-btn" title="Rotate Left (Q)" onClick={rotateSelectionLeft}>Rotate L</button>
                 <button className="action-btn" title="Rotate Right (E)" onClick={rotateSelectionRight}>Rotate R</button>
+            </div>
+            <div className="transform-controls">
+                <button
+                    className={`action-btn ${isStamping ? 'active' : ''}`}
+                    title="Stamp (Space)"
+                    onClick={stamp}
+                    style={{ gridColumn: 'span 2', marginTop: '8px', fontSize: '0.85rem' }}
+                >
+                    Stamp
+                </button>
             </div>
         </div>
     );

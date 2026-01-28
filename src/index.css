@@ -136,10 +136,12 @@ body {
     color: var(--text-color);
 }
 
-.tool-btn.active {
+.tool-btn.active,
+.action-btn.active {
     background: var(--accent-color);
     color: white;
     border-color: var(--accent-hover);
+    transform: scale(0.95);
 }
 
 /* Timeline */
@@ -907,6 +909,29 @@ body {
 
 .main-sprite-editor.is-drawing.drag-start-inside:not(.cursor-masked) {
     cursor: var(--selection-cursor) !important;
+}
+
+/* Stamp Animation */
+.pixel.stamping {
+    animation: stampJump 0.2s ease-in-out;
+    position: relative;
+    /* Ensure transform applies on z-index context if needed, though grid items work fine */
+    z-index: 100;
+    /* Pop above during jump */
+}
+
+@keyframes stampJump {
+    0% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-5px);
+    }
+
+    100% {
+        transform: translateY(0);
+    }
 }
 
 .onion-skin-layer .pixel {

@@ -40,6 +40,8 @@ interface EditorContextType {
     isOnionSkinning: boolean;
     setIsOnionSkinning: (on: boolean) => void;
     importMultipleFromJSON: (files: { name: string; pixels: (string | null)[] }[]) => void;
+    stamp: () => void;
+    isStamping: boolean;
 }
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
@@ -63,6 +65,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [floatingLayerState, setFloatingLayerState] = useState<Map<number, string>>(new Map());
     const [isPlaying, setIsPlaying] = useState(false);
     const [isOnionSkinning, setIsOnionSkinning] = useState(false);
+    const [isStamping, setIsStamping] = useState(false);
 
     // Helper to save history
     const saveHistory = useCallback((currentSprites: Sprite[], spriteId: number) => {
@@ -94,7 +97,30 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
     }, []);
 
-    const stampSelection = useCallback(() => {
+    const stamp = useCallback(() => {
+        if (floatingLayerState.size > 0) {
+            // Trigger Animation
+            setIsStamping(true);
+            setTimeout(() => setIsStamping(false), 200);
+
+            // Stamp to background (commit COPY)
+            setSprites(prevSprites => {
+                const nextSprites = prevSprites.map(sprite => {
+                    if (sprite.id !== activeSpriteId) return sprite;
+                    const newPixelData = [...sprite.pixelData];
+                    floatingLayerState.forEach((color, idx) => {
+                        newPixelData[idx] = color;
+                    });
+                    return { ...sprite, pixelData: newPixelData };
+                });
+                return saveHistory(nextSprites, activeSpriteId);
+            });
+            // DO NOT Clear floating layer (Stay floating)
+        }
+    }, [floatingLayerState, activeSpriteId, saveHistory]);
+
+    const clearSelection = useCallback(() => {
+        // Commits current floating layer and clears selection
         if (floatingLayerState.size > 0) {
             setSprites(prevSprites => {
                 const nextSprites = prevSprites.map(sprite => {
@@ -109,12 +135,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             });
             setFloatingLayerState(new Map());
         }
-    }, [floatingLayerState, activeSpriteId, saveHistory]);
-
-    const clearSelection = useCallback(() => {
-        stampSelection();
         setSelectedPixelsState(new Set());
-    }, [stampSelection]);
+    }, [floatingLayerState, activeSpriteId, saveHistory]);
 
     const liftSelection = useCallback((pixelsOverride?: Set<number>) => {
         const pixelsToLift = pixelsOverride || selectedPixels;
@@ -510,9 +532,10 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (sprite.id === activeSpriteId) {
                 // Masking Check: If selection exists, only allow painting inside it
                 // (Already handled above for floating layer, so here we block if selection exists but point is outside)
-                if (selectedPixels.size > 0) {
-                    return sprite;
-                }
+                // UPDATE: Removed strict block to allow "Start Outside -> Draw Outside" behavior controlled by Editor.tsx
+                // if (selectedPixels.size > 0) {
+                //     return sprite;
+                // }
 
                 const newPixelData = [...sprite.pixelData];
 
@@ -738,7 +761,9 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 setIsPlaying,
                 isOnionSkinning,
                 setIsOnionSkinning,
-                importMultipleFromJSON
+                importMultipleFromJSON,
+                stamp,
+                isStamping
             }}
         >
             {children}
