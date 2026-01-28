@@ -832,7 +832,7 @@ body {
     height: 100%;
     /* Fill the grid cell */
     background: var(--grid-bg);
-    cursor: crosshair;
+    cursor: inherit;
     transition: opacity 0.1s;
 }
 
@@ -877,6 +877,36 @@ body {
 .pixel.is-selected {
     box-shadow: inset 0 0 0 2px white, 0 0 4px rgba(255, 255, 255, 0.5) !important;
     z-index: 5;
+}
+
+/* 
+   When hovering over a selected pixel with brush or fill tools, 
+/* 
+   When hovering over a selected pixel with brush or fill tools, 
+   switch to the glowing version of that tool's cursor.
+   This variable is dynamically set in Editor.tsx.
+   
+/* 
+   Exception: Mask cursor visibility based on drag origin 
+   - Managed via 'cursor-masked' class on container (toggled via Ref in Editor.tsx for performance)
+   - Switches to 'faint' version of the cursor
+*/
+.main-sprite-editor.cursor-masked {
+    cursor: var(--cursor-faint) !important;
+}
+
+/* 
+   Selection Cursor Highlight 
+   - Default: Show glow on hover when NOT drawing
+   - Drawing: Lock glow cursor on container if drag started inside to prevent flickering
+*/
+.main-sprite-editor:not(.is-drawing).tool-brush .pixel.is-selected:hover,
+.main-sprite-editor:not(.is-drawing).tool-fill .pixel.is-selected:hover {
+    cursor: var(--selection-cursor) !important;
+}
+
+.main-sprite-editor.is-drawing.drag-start-inside:not(.cursor-masked) {
+    cursor: var(--selection-cursor) !important;
 }
 
 .onion-skin-layer .pixel {

@@ -20,7 +20,7 @@ export const Sidebar: React.FC = () => {
             <div className="tool-group">
                 <button
                     className={`tool-btn ${currentTool === 'fill' ? 'active' : ''}`}
-                    onClick={() => setTool('fill')}
+                    onClick={() => setTool(currentTool === 'fill' ? 'brush' : 'fill')}
                 >
                     Fill
                 </button>

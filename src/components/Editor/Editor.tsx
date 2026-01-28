@@ -4,6 +4,10 @@ import { calculateLassoSelection } from '../../utils/lasso';
 import { getLinePixels } from '../../utils/draw';
 
 export const Editor: React.FC = () => {
+    const editorContainerRef = useRef<HTMLDivElement>(null);
+    // Track if drag started inside or outside selection to mask cursor visibility
+    const [dragOrigin, setDragOrigin] = React.useState<'inside' | 'outside' | null>(null);
+
     const {
         activeSprite,
         updatePixel,
@@ -21,7 +25,8 @@ export const Editor: React.FC = () => {
         isPlaying,
         isOnionSkinning,
         sprites,
-        activeSpriteId
+        activeSpriteId,
+        currentColor
     } = useEditor();
 
     const activeSpriteIndex = sprites.findIndex(s => s.id === activeSpriteId);
@@ -57,11 +62,141 @@ export const Editor: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [selectedPixels, nudgeSelection]);
 
+    const styles = React.useMemo(() => {
+        const sideSize = 24;
+
+        if (currentTool === 'brush') {
+            const containerSize = sideSize + 4;
+            const half = containerSize / 2;
+            const svg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="2" width="${sideSize}" height="${sideSize}" fill="${currentColor}" stroke="white" stroke-width="1" />
+                </svg>
+            `;
+            // Faint version for masked areas (out of bounds)
+            const faintSvg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="2" width="${sideSize}" height="${sideSize}" fill="${currentColor}" stroke="white" stroke-width="1" opacity="0.3" />
+                </svg>
+            `;
+            // Glowing version for selection hover
+            const glowSvg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                     <defs>
+                        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    <rect x="4" y="4" width="${sideSize - 4}" height="${sideSize - 4}" fill="${currentColor}" stroke="white" stroke-width="2" filter="url(#glow)" />
+                </svg>
+            `;
+            return {
+                cursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${half} ${half}, auto` },
+                faintCursorStyle: `url('data:image/svg+xml;utf8,${encodeURIComponent(faintSvg)}') ${half} ${half}, auto`,
+                selectionCursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(glowSvg)}') ${half} ${half}, auto` }
+            };
+        }
+
+        if (currentTool === 'fill') {
+            // Single square matching brush sideSize (24px) but rotated 45 degrees
+            const containerSize = 40; // Room for rotation + border
+            const center = containerSize / 2;
+            const offset = (containerSize - sideSize) / 2;
+
+            const svg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="${offset}" y="${offset}" width="${sideSize}" height="${sideSize}" fill="${currentColor}" stroke="white" stroke-width="1" transform="rotate(45, ${center}, ${center})" />
+                </svg>
+            `;
+            const glowSvg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                     <defs>
+                        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    <rect x="${offset + 2}" y="${offset + 2}" width="${sideSize - 4}" height="${sideSize - 4}" fill="${currentColor}" stroke="white" stroke-width="2" filter="url(#glow)" transform="rotate(45, ${center}, ${center})" />
+                </svg>
+            `;
+            return {
+                cursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${center} ${center}, auto` },
+                faintCursorStyle: `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${center} ${center}, auto`, // Fill doesn't fade
+                selectionCursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(glowSvg)}') ${center} ${center}, auto` }
+            };
+        }
+
+        if (currentTool === 'eraser') {
+            const containerSize = sideSize + 4;
+            const half = containerSize / 2;
+            // Match .clear-swatch: #2d2d2d bg, #ff3333 diagonal
+            const svg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="3" width="${sideSize - 2}" height="${sideSize - 2}" fill="#2d2d2d" stroke="#3e3e3e" stroke-width="1" />
+                    <line x1="${sideSize}" y1="4" x2="4" y2="${sideSize}" stroke="#ff3333" stroke-width="2" />
+                </svg>
+            `;
+            // Faint Eraser
+            const faintSvg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                    <g opacity="0.3">
+                        <rect x="3" y="3" width="${sideSize - 2}" height="${sideSize - 2}" fill="#2d2d2d" stroke="#3e3e3e" stroke-width="1" />
+                        <line x1="${sideSize}" y1="4" x2="4" y2="${sideSize}" stroke="#ff3333" stroke-width="2" />
+                    </g>
+                </svg>
+            `;
+            return {
+                cursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${half} ${half}, auto` },
+                faintCursorStyle: `url('data:image/svg+xml;utf8,${encodeURIComponent(faintSvg)}') ${half} ${half}, auto`,
+                selectionCursorStyle: { cursor: 'default' }
+            };
+        }
+
+        if (currentTool === 'select') {
+            const containerSize = sideSize + 4;
+            const half = containerSize / 2;
+            // Glowing square
+            const svg = `
+                <svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg">
+                   <defs>
+                        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    <rect x="4" y="4" width="${sideSize - 4}" height="${sideSize - 4}" fill="none" stroke="white" stroke-width="2" filter="url(#glow)" />
+                </svg>
+            `;
+            return { cursorStyle: { cursor: `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${half} ${half}, auto` }, faintCursorStyle: 'default', selectionCursorStyle: { cursor: 'default' } };
+        }
+
+        return { cursorStyle: { cursor: 'default' }, faintCursorStyle: 'default', selectionCursorStyle: { cursor: 'default' } };
+    }, [currentTool, currentColor]);
+
+    // Deconstruct styles
+    const { cursorStyle, faintCursorStyle, selectionCursorStyle } = styles;
+
     if (!activeSprite) return null;
 
     const handleMouseDown = (index: number) => {
         // Reset last pixel on new stroke
         lastPixelIndexRef.current = index;
+
+        // Check where drag started (Masking only for Brush/Eraser to Faint, not Select or Fill)
+        if (currentTool === 'brush' || currentTool === 'eraser') {
+            const region = selectedPixels.has(index) ? 'inside' : 'outside';
+            setDragOrigin(region);
+        }
 
         if (currentTool === 'fill') {
             fill(index);
@@ -86,6 +221,19 @@ export const Editor: React.FC = () => {
 
     const handleMouseEnter = (index: number) => {
         if (isDrawing) {
+            // Optimization: If masked (drag started 'inside' but now 'outside', or vice-versa),
+            // prevent updates to stop re-renders and blinking.
+            // Also use direct DOM manipulation for cursor to bypass React render cycle latency.
+            const isMasked = (dragOrigin === 'inside' && !selectedPixels.has(index)) ||
+                (dragOrigin === 'outside' && selectedPixels.has(index));
+
+            if (isMasked) {
+                if (editorContainerRef.current) editorContainerRef.current.classList.add('cursor-masked');
+                return;
+            } else {
+                if (editorContainerRef.current) editorContainerRef.current.classList.remove('cursor-masked');
+            }
+
             if (currentTool === 'select') {
                 if (lastPixelIndexRef.current !== null && lastPixelIndexRef.current !== index) {
                     const pixels = getLinePixels(lastPixelIndexRef.current, index);
@@ -136,17 +284,30 @@ export const Editor: React.FC = () => {
 
         setIsDrawing(false);
         lastPixelIndexRef.current = null;
+        setDragOrigin(null);
+        if (editorContainerRef.current) editorContainerRef.current.classList.remove('cursor-masked');
     };
 
     const handleMouseLeave = () => {
         setIsDrawing(false);
         isLassoingRef.current = false;
         lastPixelIndexRef.current = null;
+        setDragOrigin(null);
+        if (editorContainerRef.current) editorContainerRef.current.classList.remove('cursor-masked');
     };
 
     return (
         <div className="main-editor-container" onMouseLeave={handleMouseLeave} onMouseUp={handleMouseUp}>
-            <div className={`main-sprite-editor ${selectedPixels.size > 0 ? 'has-selection' : ''} ${isPlaying ? 'playing' : ''} ${isOnionSkinning ? 'onion-on' : ''}`}>
+            <div
+                ref={editorContainerRef}
+                className={`main-sprite-editor tool-${currentTool} ${selectedPixels.size > 0 ? 'has-selection' : ''} ${isPlaying ? 'playing' : ''} ${isOnionSkinning ? 'onion-on' : ''} ${isDrawing ? 'is-drawing' : ''} ${isDrawing && dragOrigin ? `drag-start-${dragOrigin}` : ''}`}
+                style={{
+                    ...cursorStyle,
+                    '--cursor-normal': cursorStyle.cursor,
+                    '--cursor-faint': faintCursorStyle,
+                    '--selection-cursor': selectionCursorStyle.cursor
+                } as any}
+            >
 
                 {/* Main Sprite Layer */}
                 {activeSprite.pixelData.map((baseColor, index) => {
