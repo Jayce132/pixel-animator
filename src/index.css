@@ -92,6 +92,10 @@ body {
     position: relative;
     padding: 16px 8px 0 8px;
     height: 100%;
+    min-width: 0;
+    /* Prevent flex blowout */
+    overflow: hidden;
+    /* Contain children */
 }
 
 /* Tools */
@@ -147,10 +151,25 @@ body {
 /* Timeline */
 .timeline-section {
     width: 100%;
+    max-width: 100vw;
+    /* Extra safety */
     margin-top: 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    min-width: 0;
+    /* Prevent flex blowout */
+}
+
+/* Timeline Frame Sizing Variable */
+:root {
+    --frame-size: 100px;
+}
+
+@media (max-width: 1024px) {
+    :root {
+        --frame-size: 75px;
+    }
 }
 
 .timeline-header {
@@ -158,9 +177,8 @@ body {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 8px;
-    padding: 0 4px;
+    padding: 0 12px;
     width: 100%;
-    max-width: 600px;
 }
 
 .timeline-title {
@@ -188,21 +206,35 @@ body {
 }
 
 .timeline-frame-list {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-rows: repeat(2, 1fr);
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     gap: 0;
     width: 100%;
-    max-width: 600px;
+    max-width: 100%;
     background: var(--panel-border);
-    padding: 1px;
+    padding: 0;
     border: 1px solid var(--panel-border);
+    align-items: center;
+    min-width: 0;
+    /* Prevent flex blowout */
+}
+
+/* Spacers for centering */
+.timeline-spacer {
+    flex: 0 0 calc(50% - (var(--frame-size) / 2));
+    width: calc(50% - (var(--frame-size) / 2));
+    /* Pointer events none to let clicks pass through if needed, though they are empty */
+    pointer-events: none;
 }
 
 .timeline-frame {
     position: relative;
-    aspect-ratio: 1;
-    width: 100%;
+    flex: 0 0 var(--frame-size);
+    /* Fixed uniform size */
+    width: var(--frame-size);
+    height: var(--frame-size);
+    /* Force square */
     background-color: var(--grid-line);
     /* base bg */
     background-image:
@@ -217,14 +249,16 @@ body {
     /* Selection border space */
 }
 
+/* Remove media query here since we use variable now, but need to ensure it overrides if defined elsewhere */
+
 /* Selected state border */
 .timeline-frame.active {
-    z-index: 2;
-    box-shadow: inset 0 0 0 2px var(--accent-color);
+    z-index: 10;
+    box-shadow: 0 0 0 2px var(--accent-color);
 }
 
 .timeline-frame:hover {
-    z-index: 1;
+    z-index: 5;
     box-shadow: inset 0 0 0 1px var(--text-muted);
 }
 
@@ -237,15 +271,15 @@ body {
     position: fixed;
     pointer-events: none;
     z-index: 9999;
-    width: 150px;
-    /* Big square frame size */
+    width: var(--frame-size);
+    /* Match timeline frame size */
     aspect-ratio: 1;
     opacity: 0.8;
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     border: 2px solid var(--accent-color);
     background: var(--panel-bg);
-    transform: translate(-50%, -50%);
-    /* Center on cursor */
+    transform: translate(-30%, -30%);
+    /* Offset slightly from cursor for visibility */
 }
 
 .drag-ghost .frame-preview {

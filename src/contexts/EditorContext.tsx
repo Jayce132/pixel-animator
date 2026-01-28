@@ -550,7 +550,10 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const addSprite = useCallback(() => {
         setSprites(prev => {
-            if (prev.length >= 8) return prev; // Legacy limit
+            if (prev.length >= 64) {
+                alert('Frame limit reached (64)');
+                return prev;
+            }
             const newId = prev.length > 0 ? Math.max(...prev.map(s => s.id)) + 1 : 0;
             const newSprite: Sprite = {
                 id: newId,
@@ -562,11 +565,14 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setActiveSpriteId(newId);
             return [...prev, newSprite];
         });
-    }, []);
+    }, [setActiveSpriteId]);
 
     const duplicateSprite = useCallback(() => {
         setSprites(prev => {
-            if (prev.length >= 8) return prev; // Legacy limit
+            if (prev.length >= 64) {
+                alert('Frame limit reached (64)');
+                return prev;
+            }
             const activeIndex = prev.findIndex(s => s.id === activeSpriteId);
             if (activeIndex === -1) return prev;
 
@@ -662,10 +668,15 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const importMultipleFromJSON = useCallback((files: { name: string; pixels: (string | null)[] }[]) => {
         let nextSprites = [...sprites];
         let currentActiveId = activeSpriteId;
+
         let reachedLimit = false;
-        let lastProcessedFile = "";
 
         files.forEach((file, index) => {
+            if (nextSprites.length >= 64) {
+                reachedLimit = true;
+                return;
+            }
+
             const activeIndex = nextSprites.findIndex(s => s.id === currentActiveId);
             const activeSprite = nextSprites[activeIndex];
 
@@ -680,33 +691,26 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 nextSprites = saveHistory(nextSprites, activeSprite.id);
             } else {
                 // ADD NEW: For subsequent files or if current wasn't blank
-                if (nextSprites.length < 8) {
-                    const newId = Math.max(...nextSprites.map(s => s.id), -1) + 1;
-                    const newSprite: Sprite = {
-                        id: newId,
-                        name: `Sprite ${nextSprites.length}`,
-                        pixelData: [...file.pixels],
-                        history: [[...file.pixels]],
-                        redoHistory: []
-                    };
-                    // Always append to the end
-                    nextSprites.push(newSprite);
-                    currentActiveId = newId;
-                } else {
-                    if (!reachedLimit) {
-                        reachedLimit = true;
-                        lastProcessedFile = file.name;
-                    }
-                }
+                const newId = Math.max(...nextSprites.map(s => s.id), -1) + 1;
+                const newSprite: Sprite = {
+                    id: newId,
+                    name: `Sprite ${nextSprites.length}`,
+                    pixelData: [...file.pixels],
+                    history: [[...file.pixels]],
+                    redoHistory: []
+                };
+                // Always append to the end
+                nextSprites.push(newSprite);
+                currentActiveId = newId;
             }
         });
 
+        if (reachedLimit) {
+            alert('Frame limit reached (64). Some files were not imported.');
+        }
+
         setSprites(nextSprites);
         setActiveSpriteId(currentActiveId);
-
-        if (reachedLimit) {
-            alert(`Reached maximum of 8 sprites. Stopped before ${lastProcessedFile}`);
-        }
     }, [activeSpriteId, saveHistory, setActiveSpriteId, sprites]);
 
     const clearCanvas = useCallback(() => {

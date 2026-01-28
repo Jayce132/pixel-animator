@@ -14,6 +14,7 @@ interface TimelineFrameProps {
     onDragEnd?: (e: React.DragEvent) => void;
     onDragOver?: (e: React.DragEvent, index: number) => void;
     onDrop?: (e: React.DragEvent) => void;
+    style?: React.CSSProperties;
 }
 
 export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
@@ -27,14 +28,15 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     onDragStart,
     onDragEnd,
     onDragOver,
-    onDrop
+    onDrop,
+    style
 }) => {
     return (
         <div
             className={`timeline-frame ${isActive && !isAdd ? 'active' : ''} ${isAdd ? 'add-new' : ''} ${isDragging ? 'dragging' : ''} ${isDeletePending ? 'delete-pending' : ''}`}
             onClick={onClick}
             title={isAdd ? 'Duplicate Selected Frame' : sprite.name}
-            style={{ position: 'relative' }}
+            style={{ position: 'relative', ...style }}
             draggable={!isAdd}
             onDragStart={(e) => onDragStart?.(e, index)}
             onDragEnd={onDragEnd}
