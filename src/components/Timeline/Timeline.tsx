@@ -1,7 +1,21 @@
 import React from 'react';
 import { useEditor } from '../../contexts/EditorContext';
 import { TimelineFrame } from './TimelineFrame';
+import { SortableFrame } from './SortableFrame';
 import { GRID_SIZE } from '../../types';
+import {
+    DndContext,
+    closestCenter,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragOverlay,
+} from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent, DragOverEvent } from '@dnd-kit/core';
+import {
+    SortableContext,
+    horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
 
 export const Timeline: React.FC = () => {
     const {
@@ -9,7 +23,6 @@ export const Timeline: React.FC = () => {
         activeSpriteId,
         activeSprite,
         setActiveSpriteId,
-        addSprite,
         duplicateSprite,
         deleteSprite,
         moveSprite,
@@ -26,9 +39,6 @@ export const Timeline: React.FC = () => {
     const handleFrameMouseDown = React.useCallback((e: React.MouseEvent, index: number, sprite: any) => {
         setIsPlaying(false);
         const targetBatch = Math.floor(index / 8);
-        // We need access to currentBatch state, pass updater or check it
-        // To keep handler stable we might need ref for currentBatch or use setState form
-        // But BATCH_SIZE is 8 const.
         setCurrentBatch(prev => {
             if (targetBatch !== prev) return targetBatch;
             return prev;
@@ -82,33 +92,26 @@ export const Timeline: React.FC = () => {
 
     const handleExportJSON = () => {
         if (!activeSprite) return;
-
         const jsonData = {
             width: GRID_SIZE,
             height: GRID_SIZE,
             pixels: activeSprite.pixelData
         };
-
         const jsonString = JSON.stringify(jsonData, null, 2);
         const blob = new Blob([jsonString], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-
         const activeIndex = sprites.findIndex(s => s.id === activeSpriteId);
         const link = document.createElement('a');
         link.download = `sprite-${activeIndex + 1}.json`;
         link.href = url;
         link.click();
-
         URL.revokeObjectURL(url);
     };
 
     const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const fileList = e.target.files;
         if (!fileList || fileList.length === 0) return;
-
-        // Convert FileList to array and sort by name to ensure consistent order
         const filesArray = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name));
-
         try {
             const results = await Promise.all(
                 filesArray.map(file => {
@@ -131,27 +134,25 @@ export const Timeline: React.FC = () => {
                     });
                 })
             );
-
             importMultipleFromJSON(results);
         } catch (err) {
             console.error('Failed to parse JSON import:', err);
             alert('One or more invalid JSON files');
         }
-
-        // Reset input so same files can be imported again if needed
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-    const [draggedIndex, _setDraggedIndex] = React.useState<number | null>(null);
-    const [isDeletePending, _setIsDeletePending] = React.useState(false);
+    const [pendingDeleteId, setPendingDeleteId] = React.useState<number | null>(null);
 
-    // Refs for the global event listener to avoid stale closures
-    const draggedIndexRef = React.useRef<number | null>(null);
-    const isDeletePendingRef = React.useRef(false);
+    // If active frame changes, cancel pending delete to be safe
+    React.useEffect(() => {
+        setPendingDeleteId(null);
+    }, [activeSpriteId]);
+
     const spritesRef = React.useRef(sprites);
     const activeSpriteIdRef = React.useRef(activeSpriteId);
-    const ghostRef = React.useRef<HTMLDivElement>(null);
     const timelineRef = React.useRef<HTMLDivElement>(null);
+    const timelineContainerRef = React.useRef<HTMLDivElement>(null);
 
     // Sync refs with state
     React.useEffect(() => {
@@ -162,11 +163,7 @@ export const Timeline: React.FC = () => {
     const [currentBatch, setCurrentBatch] = React.useState(0);
     const BATCH_SIZE = 8;
 
-    // Sync active sprite to batch - Optional: Auto-switch batch if selection changes externally
-    // But user requested specific manual control, so we might keep it manual for now or auto-follow.
-    // Let's stick to manual control + hotkeys as requested.
-
-    // Keyboard Shortcuts: 1-8 to switch frames relative to BATCH
+    // Keyboard Shortcuts
     React.useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             const activeElement = document.activeElement;
@@ -176,7 +173,6 @@ export const Timeline: React.FC = () => {
 
             if (isInput) return;
 
-            // Frame Navigation: < (,) and > (.)
             if (e.key === ',' || e.key === '<') {
                 const currentId = activeSpriteIdRef.current;
                 const idx = spritesRef.current.findIndex(s => s.id === currentId);
@@ -195,26 +191,17 @@ export const Timeline: React.FC = () => {
                     setActiveSpriteId(spritesRef.current[nextIdx].id);
                 }
             }
-
-            // Map keys '1' through '8' relative to batch
             if (/^[1-8]$/.test(e.key)) {
                 const localIndex = parseInt(e.key) - 1;
                 const globalIndex = (currentBatch * BATCH_SIZE) + localIndex;
-
                 const targetSprite = spritesRef.current[globalIndex];
-                if (targetSprite) {
-                    setActiveSpriteId(targetSprite.id);
-                }
+                if (targetSprite) setActiveSpriteId(targetSprite.id);
             }
-
-            // Batch Navigation Shortcuts
             if (e.key === '9') {
                 setCurrentBatch(prev => {
                     const newBatch = Math.max(0, prev - 1);
                     const firstIdx = newBatch * BATCH_SIZE;
-                    if (spritesRef.current[firstIdx]) {
-                        setActiveSpriteId(spritesRef.current[firstIdx].id);
-                    }
+                    if (spritesRef.current[firstIdx]) setActiveSpriteId(spritesRef.current[firstIdx].id);
                     return newBatch;
                 });
             }
@@ -222,12 +209,9 @@ export const Timeline: React.FC = () => {
                 setCurrentBatch(prev => {
                     const maxBatch = Math.floor((spritesRef.current.length - 1) / BATCH_SIZE);
                     const newBatch = Math.min(prev + 1, maxBatch);
-                    // If we are already at max, newBatch == prev, no change
                     if (newBatch !== prev) {
                         const firstIdx = newBatch * BATCH_SIZE;
-                        if (spritesRef.current[firstIdx]) {
-                            setActiveSpriteId(spritesRef.current[firstIdx].id);
-                        }
+                        if (spritesRef.current[firstIdx]) setActiveSpriteId(spritesRef.current[firstIdx].id);
                     }
                     return newBatch;
                 });
@@ -236,130 +220,94 @@ export const Timeline: React.FC = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [setActiveSpriteId, currentBatch]); // Re-bind when batch changes
+    }, [setActiveSpriteId, currentBatch]);
 
     // Auto-scroll to active sprite
     const prevActiveIdRef = React.useRef(activeSpriteId);
 
+    // DND-KIT Setup
+    const [activeDragId, setActiveDragId] = React.useState<number | null>(null);
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 5, // Requires 5px movement to start drag, prevents accidental drag on click
+            },
+        })
+    );
+
+    const [isDragCoolingDown, setIsDragCoolingDown] = React.useState(false);
+
+    const handleDragStart = (event: DragStartEvent) => {
+        if (event.active.id !== undefined) {
+            setActiveDragId(Number(event.active.id));
+        }
+    };
+
+    const handleDragOver = (event: DragOverEvent) => {
+        const { over } = event;
+        if (over) {
+            const overIndex = sprites.findIndex(s => s.id === Number(over.id));
+            if (overIndex !== -1) {
+                const targetBatch = Math.floor(overIndex / BATCH_SIZE);
+                if (targetBatch !== currentBatch) {
+                    setCurrentBatch(targetBatch);
+                }
+            }
+        }
+    };
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        setActiveDragId(null);
+        setIsDragCoolingDown(true);
+
+        // Slight pause before allowing auto-snap back
+        setTimeout(() => {
+            setIsDragCoolingDown(false);
+        }, 500);
+
+        if (over && active.id !== over.id) {
+            const oldIndex = sprites.findIndex(s => s.id === Number(active.id));
+            const newIndex = sprites.findIndex(s => s.id === Number(over.id));
+
+            if (oldIndex !== -1 && newIndex !== -1) {
+                moveSprite(oldIndex, newIndex);
+            }
+        }
+    };
+
+    // Auto-scroll effect
     React.useEffect(() => {
         const container = timelineRef.current?.querySelector('.timeline-frame-list') as HTMLElement;
-
-        if (container) {
+        if (container && activeDragId === null && !isDragCoolingDown) {
+            // activeDragId checks drag, isDragCoolingDown checks pause
             const index = sprites.findIndex(s => s.id === activeSpriteId);
             if (index === -1) return;
 
-            // Mathematical scroll calculation (No layout reflow needed)
-            // Use 100 for desktop, 75 for mobile (match index.css)
             const isSmall = window.innerWidth <= 1024;
             const FRAME_SIZE = isSmall ? 75 : 100;
-
             const listWidth = container.clientWidth;
-            // The spacer at the start is 50% - FRAME_SIZE/2
             const spacerWidth = (listWidth / 2) - (FRAME_SIZE / 2);
-
-            // Total distance from start of list: spacers + frames before it
             const targetScroll = (index * FRAME_SIZE) + (FRAME_SIZE / 2) - (listWidth / 2) + spacerWidth;
 
-            // Direct DOM manipulation for maximum speed
             container.scrollTo({
                 left: targetScroll,
                 behavior: isPlaying ? 'auto' : 'smooth'
             });
         }
         prevActiveIdRef.current = activeSpriteId;
-    }, [activeSpriteId, isPlaying, sprites.length]); // sprites.length for add/delete updates
+    }, [activeSpriteId, isPlaying, sprites.length, activeDragId, isDragCoolingDown]);
 
-    // Auto-switch batch when new frame is added OR when active frame changes (e.g. playback)
-    // This ensures the current batch always matches the active frame
     React.useEffect(() => {
+        // Don't auto-switch batch while dragging or cooling down
+        if (activeDragId !== null || isDragCoolingDown) return;
+
         const index = sprites.findIndex(s => s.id === activeSpriteId);
         if (index !== -1) {
             const batch = Math.floor(index / BATCH_SIZE);
-            if (batch !== currentBatch) {
-                // If we are playing, the scroll logic handles the view.
-                // We just need to update state so opacity is correct.
-                setCurrentBatch(batch);
-            }
+            if (batch !== currentBatch) setCurrentBatch(batch);
         }
-    }, [activeSpriteId, sprites, currentBatch, BATCH_SIZE]);
-
-    // ... (drag handlers restored below)
-
-    const setDraggedIndex = (val: number | null) => {
-        draggedIndexRef.current = val;
-        _setDraggedIndex(val);
-    };
-
-    const setIsDeletePending = (val: boolean) => {
-        isDeletePendingRef.current = val;
-        _setIsDeletePending(val);
-    };
-
-    const handleDragGlobal = (e: DragEvent) => {
-        e.preventDefault();
-        if (draggedIndexRef.current === null || !timelineRef.current) return;
-
-        if (ghostRef.current && e.clientX !== 0 && e.clientY !== 0) {
-            ghostRef.current.style.left = `${e.clientX}px`;
-            ghostRef.current.style.top = `${e.clientY}px`;
-        }
-
-        const rect = timelineRef.current.getBoundingClientRect();
-        const buffer = 20;
-        const isOutside = e.clientX < rect.left - buffer || e.clientX > rect.right + buffer ||
-            e.clientY < rect.top - buffer || e.clientY > rect.bottom + buffer;
-
-        const shouldDelete = isOutside && spritesRef.current.length > 1;
-        if (isDeletePendingRef.current !== shouldDelete) {
-            setIsDeletePending(shouldDelete);
-        }
-    };
-
-    const handleDragStart = (e: React.DragEvent, index: number) => {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', index.toString());
-
-        const img = new Image();
-        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-        e.dataTransfer.setDragImage(img, 0, 0);
-
-        if (ghostRef.current) {
-            ghostRef.current.style.left = `${e.clientX}px`;
-            ghostRef.current.style.top = `${e.clientY}px`;
-        }
-
-        window.addEventListener('dragover', handleDragGlobal);
-        setTimeout(() => setDraggedIndex(index), 0);
-    };
-
-    const handleDragEnd = () => {
-        window.removeEventListener('dragover', handleDragGlobal);
-        if (isDeletePendingRef.current && draggedIndexRef.current !== null) {
-            const spriteToDelete = spritesRef.current[draggedIndexRef.current];
-            if (spriteToDelete) deleteSprite(spriteToDelete.id);
-        }
-        setDraggedIndex(null);
-        setIsDeletePending(false);
-    };
-
-    const handleDragOver = (e: React.DragEvent, overIndex?: number) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        if (ghostRef.current) {
-            ghostRef.current.style.left = `${e.clientX}px`;
-            ghostRef.current.style.top = `${e.clientY}px`;
-        }
-        if (draggedIndexRef.current === null) return;
-        if (overIndex !== undefined && draggedIndexRef.current !== overIndex) {
-            moveSprite(draggedIndexRef.current, overIndex);
-            setDraggedIndex(overIndex);
-        }
-    };
-
-    const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-    };
-
+    }, [activeSpriteId, sprites, currentBatch, BATCH_SIZE, activeDragId, isDragCoolingDown]);
 
     // FPS Rapid Adjustment
     const fpsIntervalRef = React.useRef<any>(null);
@@ -377,45 +325,19 @@ export const Timeline: React.FC = () => {
     }, []);
 
     const startFpsChange = React.useCallback((delta: number) => {
-        // Immediate change
         setFps(prev => Math.max(1, Math.min(60, prev + delta)));
-
-        // Delay before rapid change
         fpsTimeoutRef.current = setTimeout(() => {
             fpsIntervalRef.current = setInterval(() => {
                 setFps(prev => Math.max(1, Math.min(60, prev + delta)));
-            }, 80); // Fast repeat (80ms)
-        }, 400); // Initial delay (400ms)
+            }, 80);
+        }, 400);
     }, [setFps]);
 
+    // Overlay sprite 
+    const activeDragSprite = sprites.find(s => s.id === activeDragId);
 
     return (
-        <div
-            ref={timelineRef}
-            className="timeline-section"
-            onDragOver={(e) => handleDragOver(e)}
-            onDrop={handleDrop}
-        >
-            {/* Ghost ... */}
-            {draggedIndex !== null && sprites[draggedIndex] && (
-                <div
-                    ref={ghostRef}
-                    className="drag-ghost"
-                    style={{
-                        position: 'fixed',
-                        pointerEvents: 'none',
-                        zIndex: 9999
-                    }}
-                >
-                    <TimelineFrame
-                        sprite={sprites[draggedIndex]}
-                        index={draggedIndex}
-                        isActive={false}
-                        isDeletePending={isDeletePending}
-                        onMouseDown={() => { }}
-                    />
-                </div>
-            )}
+        <div ref={timelineRef} className="timeline-section">
             <div className="timeline-header">
                 <div className="timeline-controls-left">
                     <button
@@ -430,6 +352,27 @@ export const Timeline: React.FC = () => {
                         onClick={() => setIsOnionSkinning(!isOnionSkinning)}
                     >
                         Onion
+                    </button>
+                    <button
+                        className={`control-btn-small ${pendingDeleteId === activeSpriteId ? 'delete-confirm' : ''}`}
+                        onClick={() => {
+                            if (sprites.length <= 1) return;
+                            if (pendingDeleteId === activeSpriteId) {
+                                deleteSprite(activeSpriteId);
+                                setPendingDeleteId(null);
+                            } else {
+                                setPendingDeleteId(activeSpriteId);
+                            }
+                        }}
+                        title="Delete Frame"
+                        style={{
+                            marginLeft: '8px',
+                            backgroundColor: pendingDeleteId === activeSpriteId ? '#ff4444' : '',
+                            color: pendingDeleteId === activeSpriteId ? 'white' : ''
+                        }}
+                        disabled={sprites.length <= 1}
+                    >
+                        {pendingDeleteId === activeSpriteId ? 'Confirm' : 'Delete'}
                     </button>
                 </div>
                 <div className="file-controls">
@@ -447,69 +390,101 @@ export const Timeline: React.FC = () => {
                 </div>
             </div>
 
-            <div className="timeline-frame-list" style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
-                <div className="timeline-spacer" />
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 8px',
-                    color: '#888',
-                    fontSize: '0.8rem',
-                    gap: '4px',
-                    height: '100%'
-                }}>
-                    <button
-                        className="secondary-btn-small"
-                        onMouseDown={() => startFpsChange(-1)}
-                        onMouseUp={stopFpsChange}
-                        onMouseLeave={stopFpsChange}
-                        style={{ padding: '2px 4px', minWidth: '20px' }}
-                    >
-                        &lt;
-                    </button>
-                    <span style={{ minWidth: '45px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{fps} FPS</span>
-                    <button
-                        className="secondary-btn-small"
-                        onMouseDown={() => startFpsChange(1)}
-                        onMouseUp={stopFpsChange}
-                        onMouseLeave={stopFpsChange}
-                        style={{ padding: '2px 4px', minWidth: '20px' }}
-                    >
-                        &gt;
-                    </button>
-                </div>
-                {sprites.map((sprite, index) => {
-                    const isInBatch = index >= currentBatch * BATCH_SIZE && index < (currentBatch + 1) * BATCH_SIZE;
-                    return (
-                        <TimelineFrame
-                            key={sprite.id}
-                            index={index}
-                            sprite={sprite}
-                            isActive={sprite.id === activeSpriteId}
-                            onMouseDown={handleFrameMouseDown}
-                            onDragStart={handleDragStart}
-                            onDragEnd={handleDragEnd}
-                            onDragOver={handleDragOver}
-                            onDrop={handleDrop}
-                            isDragging={index === draggedIndex}
-                            isDeletePending={index === draggedIndex && isDeletePending}
-                            isInBatch={isInBatch}
-                        />
-                    );
-                })}
+            <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+                autoScroll={{
+                    enabled: true,
+                    acceleration: 10,  // Smooth acceleration
+                    interval: 10       // Update 10ms
+                }}
+            >
+                <div ref={timelineContainerRef} className="timeline-frame-list" style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+                    <div className="timeline-spacer" />
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '0 8px',
+                        color: '#888',
+                        fontSize: '0.8rem',
+                        gap: '4px',
+                        height: '100%'
+                    }}>
+                        <button
+                            className="secondary-btn-small"
+                            onMouseDown={() => startFpsChange(-1)}
+                            onMouseUp={stopFpsChange}
+                            onMouseLeave={stopFpsChange}
+                            style={{ padding: '2px 4px', minWidth: '20px' }}
+                        >
+                            &lt;
+                        </button>
+                        <span style={{ minWidth: '45px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{fps} FPS</span>
+                        <button
+                            className="secondary-btn-small"
+                            onMouseDown={() => startFpsChange(1)}
+                            onMouseUp={stopFpsChange}
+                            onMouseLeave={stopFpsChange}
+                            style={{ padding: '2px 4px', minWidth: '20px' }}
+                        >
+                            &gt;
+                        </button>
+                    </div>
 
-                {activeSprite && sprites.length < 64 && (
-                    <TimelineFrame
-                        sprite={activeSprite}
-                        isAdd={true}
-                        index={sprites.length}
-                        isActive={false}
-                        onMouseDown={handleAddFrameMouseDown}
-                    />
-                )}
-                <div className="timeline-spacer" />
-            </div>
+                    <SortableContext
+                        items={sprites.map(s => s.id)}
+                        strategy={horizontalListSortingStrategy}
+                    >
+                        {sprites.map((sprite, index) => {
+                            const isInBatch = index >= currentBatch * BATCH_SIZE && index < (currentBatch + 1) * BATCH_SIZE;
+                            return (
+                                <React.Fragment key={sprite.id}>
+                                    <SortableFrame
+                                        id={sprite.id}
+                                        index={index}
+                                        sprite={sprite}
+                                        isActive={activeDragId === null && sprite.id === activeSpriteId}
+                                        onMouseDown={handleFrameMouseDown}
+                                        isDeletePending={pendingDeleteId === sprite.id}
+                                        isInBatch={isInBatch}
+                                    />
+                                </React.Fragment>
+                            );
+                        })}
+                    </SortableContext>
+
+                    {/* Add Frame Button (Outside sortable context) */}
+                    {activeSprite && sprites.length < 64 && (
+                        <div style={{ display: 'inline-block' }}>
+                            <TimelineFrame
+                                sprite={activeSprite}
+                                isAdd={true}
+                                index={sprites.length}
+                                isActive={false}
+                                onMouseDown={handleAddFrameMouseDown}
+                            />
+                        </div>
+                    )}
+                    <div className="timeline-spacer" />
+                </div>
+
+                <DragOverlay>
+                    {activeDragSprite ? (
+                        <div className="timeline-frame-wrapper" style={{ opacity: 0.8 }}>
+                            <TimelineFrame
+                                sprite={activeDragSprite}
+                                index={sprites.findIndex(s => s.id === activeDragSprite.id)}
+                                isActive={true}
+                                onMouseDown={() => { }}
+                            />
+                        </div>
+                    ) : null}
+                </DragOverlay>
+            </DndContext>
         </div>
     );
 };

@@ -37,6 +37,7 @@ export const Editor: React.FC = () => {
     const editorContainerRef = useRef<HTMLDivElement>(null);
     // Track if drag started inside or outside selection to mask cursor visibility
     const [dragOrigin, setDragOrigin] = React.useState<'inside' | 'outside' | null>(null);
+    const dragOriginRef = useRef<'inside' | 'outside' | null>(null);
 
     const {
         activeSprite,
@@ -183,7 +184,7 @@ export const Editor: React.FC = () => {
                             </feMerge>
                         </filter>
                     </defs>
-                    <rect x="${pad}" y="${pad}" width="${drawSize}" height="${drawSize}" fill="${currentColor}" stroke="white" stroke-width="2" filter="url(#glow)" />
+                    <rect x="${pad}" y="${pad}" width="${drawSize}" height="${drawSize}" fill="${currentColor || 'none'}" stroke="white" stroke-width="2" filter="url(#glow)" />
                 </svg>
             `;
 
@@ -251,7 +252,7 @@ export const Editor: React.FC = () => {
 
             const svg = `
                 <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 ${iconSize} ${iconSize}" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="${offset}" y="${offset}" width="${baseSide}" height="${baseSide}" fill="${currentColor}" stroke="white" stroke-width="1" transform="rotate(45, ${center}, ${center})" />
+                    <rect x="${offset}" y="${offset}" width="${baseSide}" height="${baseSide}" fill="${currentColor || 'none'}" stroke="white" stroke-width="1" transform="rotate(45, ${center}, ${center})" />
                 </svg>
             `;
             const glowSvg = `
@@ -265,7 +266,7 @@ export const Editor: React.FC = () => {
                             </feMerge>
                         </filter>
                     </defs>
-                    <rect x="${offset + 2}" y="${offset + 2}" width="${baseSide - 4}" height="${baseSide - 4}" fill="${currentColor}" stroke="white" stroke-width="2" filter="url(#glow)" transform="rotate(45, ${center}, ${center})" />
+                    <rect x="${offset + 2}" y="${offset + 2}" width="${baseSide - 4}" height="${baseSide - 4}" fill="${currentColor || 'none'}" stroke="white" stroke-width="2" filter="url(#glow)" transform="rotate(45, ${center}, ${center})" />
                 </svg>
             `;
             return {
@@ -299,6 +300,7 @@ export const Editor: React.FC = () => {
         if (currentTool === 'brush' || currentTool === 'eraser') {
             const region = selectedPixels.has(index) ? 'inside' : 'outside';
             setDragOrigin(region);
+            dragOriginRef.current = region;
         }
 
         if (currentTool === 'fill') {
@@ -319,7 +321,7 @@ export const Editor: React.FC = () => {
         }
 
         setIsDrawing(true);
-        updatePixel(index);
+        updatePixel(index, dragOriginRef.current);
     };
 
     const handleMouseEnter = (index: number) => {
@@ -361,8 +363,8 @@ export const Editor: React.FC = () => {
 
             // Helper to check if a specific pixel can be painted based on start origin
             const canPaint = (idx: number) => {
-                if (dragOrigin === 'inside') return selectedPixels.has(idx);
-                if (dragOrigin === 'outside') return !selectedPixels.has(idx);
+                if (dragOriginRef.current === 'inside') return selectedPixels.has(idx);
+                if (dragOriginRef.current === 'outside') return !selectedPixels.has(idx);
                 return true;
             };
 
@@ -382,10 +384,10 @@ export const Editor: React.FC = () => {
             if (lastPixelIndexRef.current !== null && lastPixelIndexRef.current !== index) {
                 const pixels = getLinePixels(lastPixelIndexRef.current, index);
                 pixels.forEach(idx => {
-                    if (canPaint(idx)) updatePixel(idx);
+                    if (canPaint(idx)) updatePixel(idx, dragOriginRef.current);
                 });
             } else {
-                if (canPaint(index)) updatePixel(index);
+                if (canPaint(index)) updatePixel(index, dragOriginRef.current);
             }
 
             // Always update last position so the line 'follows' even through masks

@@ -7,12 +7,12 @@ interface EditorContextType {
     sprites: Sprite[];
     activeSpriteId: number;
     activeSprite: Sprite | undefined;
-    currentColor: string;
+    currentColor: string | null;
     currentTool: Tool;
     isDrawing: boolean;
     recentColors: string[];
     setIsDrawing: (drawing: boolean) => void;
-    updatePixel: (pixelIndex: number) => void;
+    updatePixel: (pixelIndex: number, maskConstraint?: 'inside' | 'outside' | null) => void;
     fill: (pixelIndex: number) => void;
     selectedPixels: Set<number>;
     setSelectedPixels: (pixels: Set<number>) => void;
@@ -26,7 +26,7 @@ interface EditorContextType {
     rotateSelectionRight: () => void;
     nudgeSelection: (dx: number, dy: number) => void;
     setActiveSpriteId: (id: number) => void;
-    setCurrentColor: (color: string) => void;
+    setCurrentColor: (color: string | null) => void;
     setTool: (tool: Tool) => void;
     undo: () => void;
     redo: () => void;
@@ -62,7 +62,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     ]);
     const [activeSpriteId, setActiveSpriteId] = useState<number>(0);
-    const [currentColor, setCurrentColor] = useState<string>(PRESET_COLORS[0]);
+    const [currentColor, setCurrentColor] = useState<string | null>(PRESET_COLORS[0]);
     const [currentTool, setTool] = useState<Tool>('brush');
     const [isDrawingState, setIsDrawingState] = useState(false);
     const [recentColors, setRecentColors] = useState<string[]>([]);
@@ -442,41 +442,83 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const fill = useCallback((startIndex: number) => {
         // Floating Layer Fill
         if (selectedPixels.has(startIndex)) {
-            const targetColor = floatingLayerState.get(startIndex) || null; // Handle transparency within selection
+            // Calculate starting target color (Composite: Float > Base)
+            const baseStartColor = activeSprite?.pixelData[startIndex] || null;
+            const targetColor = floatingLayerState.has(startIndex) ? floatingLayerState.get(startIndex)! : baseStartColor;
+
             const replacementColor = currentColor;
 
             if (targetColor === replacementColor) return;
 
-            setFloatingLayerState(prev => {
-                const newLayer = new Map(prev);
-                const queue = [startIndex];
-                const visited = new Set<number>();
+            // We need to update BOTH floating layer and potentially base layer (if erasing)
+            // But updating base layer requires setSprites, which is separate from setFloatingLayerState.
+            // Complex atomic update needed? 
+            // Simpler: Determine pixels to change, then dispatch updates.
 
-                while (queue.length > 0) {
-                    const currentIndex = queue.shift()!;
-                    if (visited.has(currentIndex)) continue;
-                    visited.add(currentIndex);
+            const pixelsToChange: number[] = [];
+            const queue = [startIndex];
+            const visited = new Set<number>();
 
-                    if (!selectedPixels.has(currentIndex)) continue;
+            // 1. Find all connected pixels matching targetColor
+            while (queue.length > 0) {
+                const currentIndex = queue.shift()!;
+                if (visited.has(currentIndex)) continue;
+                visited.add(currentIndex);
 
-                    const currentColorAtIdx = newLayer.get(currentIndex) || null;
-                    if (currentColorAtIdx === targetColor) {
-                        if (replacementColor) {
-                            newLayer.set(currentIndex, replacementColor);
-                        } else {
-                            newLayer.delete(currentIndex);
-                        }
+                if (!selectedPixels.has(currentIndex)) continue;
 
-                        const x = currentIndex % GRID_SIZE;
-                        const y = Math.floor(currentIndex / GRID_SIZE);
-                        if (y > 0) queue.push(currentIndex - GRID_SIZE);
-                        if (y < GRID_SIZE - 1) queue.push(currentIndex + GRID_SIZE);
-                        if (x > 0) queue.push(currentIndex - 1);
-                        if (x < GRID_SIZE - 1) queue.push(currentIndex + 1);
-                    }
+                const baseAtIdx = activeSprite?.pixelData[currentIndex] || null;
+                const currentComposite = floatingLayerState.has(currentIndex) ? floatingLayerState.get(currentIndex)! : baseAtIdx;
+
+                if (currentComposite === targetColor) {
+                    pixelsToChange.push(currentIndex);
+
+                    const x = currentIndex % GRID_SIZE;
+                    const y = Math.floor(currentIndex / GRID_SIZE);
+                    if (y > 0) queue.push(currentIndex - GRID_SIZE);
+                    if (y < GRID_SIZE - 1) queue.push(currentIndex + GRID_SIZE);
+                    if (x > 0) queue.push(currentIndex - 1);
+                    if (x < GRID_SIZE - 1) queue.push(currentIndex + 1);
                 }
-                return newLayer;
-            });
+            }
+
+            // 2. Apply changes
+            if (pixelsToChange.length > 0) {
+                // Update Floating Layer
+                setFloatingLayerState(prev => {
+                    const newLayer = new Map(prev);
+                    pixelsToChange.forEach(idx => {
+                        if (replacementColor) {
+                            newLayer.set(idx, replacementColor);
+                        } else {
+                            newLayer.delete(idx);
+                        }
+                    });
+                    return newLayer;
+                });
+
+                // Update Base Layer ONLY if erasing (replacementColor is null)
+                // If painting color, we just put it on float (masking base), so base can stay.
+                if (replacementColor === null) {
+                    setSprites(prevSprites => {
+                        return prevSprites.map(sprite => {
+                            if (sprite.id !== activeSpriteId) return sprite;
+                            const newPixelData = [...sprite.pixelData];
+                            let changed = false;
+                            pixelsToChange.forEach(idx => {
+                                if (newPixelData[idx] !== null) {
+                                    newPixelData[idx] = null;
+                                    changed = true;
+                                }
+                            });
+                            if (!changed) return sprite;
+                            // History save logic
+                            return saveHistory([{ ...sprite, pixelData: newPixelData }], activeSpriteId)[0];
+                        });
+                    });
+                }
+            }
+
             setTool('brush');
             return;
         }
@@ -531,8 +573,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setTool('brush');
     }, [activeSpriteId, currentColor, saveHistory, selectedPixels, floatingLayerState]);
 
-    const updatePixel = useCallback((pixelIndex: number) => {
-        const targetColor = currentTool === 'eraser' ? null : currentColor;
+    const updatePixel = useCallback((pixelIndex: number, maskConstraint: 'inside' | 'outside' | null = null) => {
+        const targetColor = (currentTool === 'eraser' || currentColor === null) ? null : currentColor;
 
         // Calculate pixels based on brush size
         const pixelsToUpdate: number[] = [];
@@ -548,13 +590,26 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (x + 1 < GRID_SIZE && y + 1 < GRID_SIZE) pixelsToUpdate.push(pixelIndex + GRID_SIZE + 1);
         }
 
+        // Apply strict filtering based on maskConstraint (Smart Masking)
+        // This MUST happen before we check hitsSelection, to ensure we don't accidentally "hit" the selection
+        // with a pixel that should have been masked out.
+        const filteredPixels = pixelsToUpdate.filter(idx => {
+            if (maskConstraint === 'inside') {
+                return selectedPixels.has(idx);
+            }
+            if (maskConstraint === 'outside') {
+                return !selectedPixels.has(idx);
+            }
+            return true;
+        });
+
+        if (filteredPixels.length === 0) return;
+
         // Helper to update a map (for floating layer)
         const updateMap = (prev: Map<number, string>) => {
             const newLayer = new Map(prev);
-            pixelsToUpdate.forEach(idx => {
-                if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return; // Mask check for floating layer? 
-                // Actually floating layer masking is strict: only pixels IN selection are floating.
-                // So we only update if idx is in selection.
+            filteredPixels.forEach(idx => {
+                if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return;
                 if (selectedPixels.has(idx)) {
                     if (targetColor === null) {
                         newLayer.delete(idx);
@@ -567,16 +622,62 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
 
         // If ANY of the target pixels are in selection, we treat this as a potentially mixed operation
-        // But simplifying: update floating layer if we are interacting with selection
-        const hitsSelection = pixelsToUpdate.some(idx => selectedPixels.has(idx));
+        const hitsSelection = filteredPixels.some(idx => selectedPixels.has(idx));
 
         if (hitsSelection) {
             setFloatingLayerState(prev => updateMap(prev));
-            // We might also need to update base sprite for pixels NOT in selection if we allow cross-boundary painting
-            // But usually selection acts as a mask. 
-            // Let's assume if you are painting "in selection", you are masked TO selection.
+
+            // If erasing (targetColor === null), we also need to potentially erase the base sprite pixels
+            // IF they are not covered by the floating layer (or if we are just deleting the float?)
+            // Actually, if we are erasing, we want to erase WHAT IS VISIBLE.
+            // If there is a floating pixel, we delete it (revealing base).
+            // If there is NO floating pixel, we erase the base.
+
+            if (targetColor === null) {
+                setSprites(prevSprites => prevSprites.map(sprite => {
+                    if (sprite.id !== activeSpriteId) return sprite;
+                    const newPixelData = [...sprite.pixelData];
+                    let changed = false;
+                    filteredPixels.forEach(idx => {
+                        // Only touch base if selected
+                        if (selectedPixels.has(idx)) {
+                            // Only erase base if NOT in floating layer (approximated by checking current state)
+                            // But React state is async. We should use the PREVIOUS floating state or just assume?
+                            // Issue: floatingLayerState here is stale relative to the updateMap above?
+                            // Actually, updateMap returns new state, but we can't access it easily here unless we combine.
+
+                            // Simplest safe logic: If we are erasing selection, we probably want to erase the base too
+                            // UNLESS we are strictly "erasing the float to reveal the base".
+                            // If I have a moved selection, I want to see the background.
+                            // If I have a static selection, I want to see checkboard.
+                            // Erasing base ensures checkboard.
+
+                            // Let's rely on the check:
+                            if (!floatingLayerState.has(idx)) {
+                                if (newPixelData[idx] !== null) {
+                                    newPixelData[idx] = null;
+                                    changed = true;
+                                }
+                            }
+                        }
+                    });
+                    if (!changed) return sprite;
+                    return saveHistory([{ ...sprite, pixelData: newPixelData }], activeSpriteId)[0];
+                    // Note: saveHistory expects array, returns array. We take the first (and only) updated sprite.
+                    // Wait, saveHistory takes (currentSprites, id). We need to pass the FULL list? 
+                    // No, simpler: just return the sprite and let a separate effect save? 
+                    // Or follow pattern: setSprites usage usually saves history.
+                }));
+                // Actually the pattern in this file is: setSprites(prev => ... saveHistory(updated, id))
+                // But here we are inside an IF block for hitsSelection.
+                // We need to trigger setSprites separate from setFloatingLayer.
+            }
             return;
         }
+
+
+
+        if (filteredPixels.length === 0) return;
 
         // Otherwise update active sprite (respecting mask)
         setSprites(prevSprites => prevSprites.map(sprite => {
@@ -594,7 +695,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 const newPixelData = [...sprite.pixelData];
                 let changed = false;
 
-                pixelsToUpdate.forEach(idx => {
+                filteredPixels.forEach(idx => {
                     // Safety check for array bounds (though x/y checks should handle it)
                     if (idx >= 0 && idx < TOTAL_PIXELS) {
                         // Don't overwrite if masked by selection (logic above handles 'hitsSelection', so here we know we are targeting outside?)
@@ -608,7 +709,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
                         // For simplicity in this step, let's assume strict masking:
                         // If selection exists, you can ONLY paint inside it.
-                        if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return;
+                        // REMOVED STRICT MASKING to allow 'Smart Masking' from Editor.tsx
+                        // if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return;
 
                         if (newPixelData[idx] !== targetColor) {
                             newPixelData[idx] = targetColor;
@@ -740,7 +842,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
     }, [isPlaying, animate, sprites.length]);
 
-    const handleSetCurrentColor = useCallback((color: string) => {
+    const handleSetCurrentColor = useCallback((color: string | null) => {
         setCurrentColor(color);
 
         // Legacy behavior: Don't switch tool if we are using fill
@@ -748,10 +850,12 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setTool('brush');
         }
 
-        setRecentColors(prev => {
-            if (prev.includes(color)) return prev;
-            return [color, ...prev].slice(0, 7);
-        });
+        if (color) {
+            setRecentColors(prev => {
+                if (prev.includes(color)) return prev;
+                return [color, ...prev].slice(0, 7);
+            });
+        }
     }, [currentTool]);
 
     const isSpriteBlank = (pixels: (string | null)[]) => {

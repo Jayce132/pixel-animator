@@ -20,8 +20,14 @@ export const RecentColors: React.FC = () => {
                         return (
                             <div
                                 key="clear"
-                                className={`palette-color clear-swatch ${currentTool === 'eraser' ? 'active' : ''}`}
-                                onClick={() => setTool('eraser')}
+                                className={`palette-color clear-swatch ${currentTool === 'eraser' || (currentTool === 'fill' && currentColor === null) ? 'active' : ''}`}
+                                onClick={() => {
+                                    if (currentTool === 'fill') {
+                                        setCurrentColor(null);
+                                    } else {
+                                        setTool('eraser');
+                                    }
+                                }}
                                 title="Transparent / Eraser"
                             />
                         );
