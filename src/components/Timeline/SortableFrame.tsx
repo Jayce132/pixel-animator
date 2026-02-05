@@ -10,8 +10,14 @@ interface SortableFrameProps {
     index: number;
     isActive: boolean;
     isDeletePending?: boolean;
-    isInBatch?: boolean;
+    isSelected?: boolean;
+    forceDragging?: boolean;
     onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
+    onClick?: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
+    onPointerDown?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
+    onPointerUp?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
+    onPointerEnter?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
+    disabled?: boolean;
 }
 
 export const SortableFrame: React.FC<SortableFrameProps> = ({
@@ -20,8 +26,14 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
     index,
     isActive,
     isDeletePending,
-    isInBatch,
-    onMouseDown
+    isSelected,
+    forceDragging,
+    onMouseDown,
+    onClick,
+    onPointerDown,
+    onPointerUp,
+    onPointerEnter,
+    disabled = false
 }) => {
     const {
         attributes,
@@ -30,7 +42,11 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
         transform,
         transition,
         isDragging,
-    } = useSortable({ id });
+    } = useSortable({
+        id,
+        data: { sprite, index },
+        disabled
+    });
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -38,7 +54,7 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
         display: 'inline-block',
         position: 'relative' as const,
         zIndex: isDragging ? 100 : 'auto',
-        opacity: isDragging ? 0 : 1, // Hide original when dragging (overlay is shown)
+        opacity: isDragging || forceDragging ? 0 : 1, // Hide original when dragging (overlay is shown)
     };
 
     return (
@@ -55,8 +71,12 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
                 index={index}
                 isActive={isActive}
                 isDeletePending={isDeletePending}
-                isInBatch={isInBatch}
+                isSelected={isSelected}
                 onMouseDown={onMouseDown}
+                onClick={onClick}
+                onPointerDown={onPointerDown}
+                onPointerUp={onPointerUp}
+                onPointerEnter={onPointerEnter}
             // Native handlers not needed
             />
             {isDeletePending && (

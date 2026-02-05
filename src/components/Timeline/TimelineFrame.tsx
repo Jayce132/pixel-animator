@@ -6,20 +6,30 @@ interface TimelineFrameProps {
     sprite: Sprite;
     isActive: boolean;
     onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
+    onClick?: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
+    onPointerDown?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
+    onPointerUp?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
+    onPointerEnter?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     index: number;
     isAdd?: boolean;
     isDeletePending?: boolean;
-    isInBatch?: boolean;
+    isSelected?: boolean;
+    isGhost?: boolean;
 }
 
 export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     sprite,
     isActive,
     onMouseDown,
+    onClick,
+    onPointerDown,
+    onPointerUp,
+    onPointerEnter,
     index,
     isAdd,
     isDeletePending,
-    isInBatch = true,
+    isSelected = false,
+    isGhost = false,
 }) => {
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
@@ -45,8 +55,28 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     }, [sprite.pixelData]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
-        e.stopPropagation();
+        // We shouldn't stop propagation here as it might interfere with dnd-kit which listens on parent
+        // But if dnd-kit uses PointerEvents, it might be fine.
+        // However, removing stopPropagation is generally safer for dnd-kit context.
+        // e.stopPropagation(); 
         onMouseDown(e, index, sprite);
+    };
+
+    const handleClick = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Stop click propagation to prevent unexpected behavior
+        if (onClick) onClick(e, index, sprite);
+    };
+
+    const handlePointerDown = (e: React.PointerEvent) => {
+        if (onPointerDown) onPointerDown(e, index, sprite);
+    };
+
+    const handlePointerUp = (e: React.PointerEvent) => {
+        if (onPointerUp) onPointerUp(e, index, sprite);
+    };
+
+    const handlePointerEnter = (e: React.PointerEvent) => {
+        if (onPointerEnter) onPointerEnter(e, index, sprite);
     };
 
     return (
@@ -55,11 +85,18 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
                 ${isActive ? 'active' : ''} 
                 ${isAdd ? 'add-new' : ''} 
                 ${isDeletePending ? 'delete-pending' : ''}
-                ${!isInBatch ? 'inactive-batch' : ''}
+                ${isSelected ? 'selected' : ''}
+                ${isGhost ? 'ghost' : ''}
             `}
             onMouseDown={handleMouseDown}
+            onClick={handleClick}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onPointerEnter={handlePointerEnter}
+            data-selectable-id={sprite.id}
             style={{
-                position: 'relative' // For overlay positioning
+                position: 'relative', // For overlay positioning
+                touchAction: 'none'
             }}
         >
             <canvas

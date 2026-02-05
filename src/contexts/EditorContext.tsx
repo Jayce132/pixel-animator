@@ -35,11 +35,12 @@ interface EditorContextType {
     duplicateSprite: () => void;
     deleteSprite: (id?: number) => void;
     moveSprite: (oldIndex: number, newIndex: number) => void;
+    moveSprites: (indices: number[], insertAtIndex: number) => void;
     isPlaying: boolean;
     setIsPlaying: (playing: boolean) => void;
     isOnionSkinning: boolean;
     setIsOnionSkinning: (on: boolean) => void;
-    importMultipleFromJSON: (files: { name: string; pixels: (string | null)[] }[]) => void;
+    importMultipleFromJSON: (files: { name: string; pixels: (string | null)[] }[]) => number[];
     stamp: () => void;
     isStamping: boolean;
     fps: number;
@@ -807,6 +808,157 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
     }, []);
 
+    const moveSprites = useCallback((indices: number[], insertAtIndex: number) => {
+        setSprites(prev => {
+            const newSprites = [...prev];
+
+            // 1. Collect sprites to move
+            const pickedSprites: Sprite[] = [];
+
+            // Sort indices descending to splice safely
+            const sortedIndices = [...indices].sort((a, b) => b - a);
+
+            // Remove them from the array
+            sortedIndices.forEach(idx => {
+                if (idx >= 0 && idx < newSprites.length) {
+                    pickedSprites.unshift(newSprites.splice(idx, 1)[0]); // Add to start to maintain original relative order
+                }
+            });
+
+            // 2. Calculate insertion point
+            // When taking items out, valid indices shift. 
+            // However, dnd-kit usually provides the "over" index which is relative to the current list.
+            // When moving items DOWN (to a higher index), the "over" index is generally the index *after* the item we are over.
+            // But since we removed items *before* it, the index might need adjustment if we were merely splicing.
+            // BUT, in this specific case, the user reported that dropping at the end (onto 4) places it on 3.
+            // This suggests we were over-correcting.
+
+            // Let's try simply using insertAtIndex as the target index in the REDUCED array, 
+            // because dnd-kit's "over" logic combined with our removal might be causing the drift.
+
+            // Actually, if I drop "after" the last item, insertAtIndex should be length.
+            // If I drop "before" an item, it should be that item's index.
+
+            // If we assume `insertAtIndex` is the index in the ORIGINAL array where we want to insert.
+            // If we remove items before it, we must decrement.
+
+            // However, let's look at `Timeline.tsx`:
+            // `const newIndex = sprites.findIndex(s => s.id === overId);`
+            // It passes the index of the sprite we are dropping OVER.
+
+            // If we drop over the last item (index 3), newIndex is 3.
+            // We want to insert AFTER it? Or REPLACE it?
+            // `dnd-kit` sortable reorder usually means "place before this item".
+
+            // If I drag 1 & 2 (indices 0, 1) to Over 4 (index 3).
+            // I remove 0 and 1. Array is now [3, 4] (indices 0, 1).
+            // Target was index 3 (original).
+            // Logic was: 3 - 2 = 1. Insert at 1.
+            // Array becomes [3, 1, 2, 4]. 
+            // Wait, if I drop OVER 4, I expect it to be [3, 1, 2, 4] (before 4) or [3, 4, 1, 2] (after 4)?
+
+            // If the user wants to place at the END, they usually drop "after" the last item.
+            // But SortableContext triggers on "over".
+
+            // Let's trust the standard reorder logic:
+            // If we are moving down, we usually want to insert AFTER the target.
+            // If we are moving up, we usually want to insert BEFORE the target.
+
+            // We need to know if we are moving forward or backward.
+            // But we have multiple indices.
+
+            // Let's simplify: 
+            // We strip the items.
+            // We verify where we want to put them.
+            // If the user dropped on "Frame 4", and Frame 4 is now at index 1 (because 0,1 gone).
+            // We probably want to put it *after* Frame 4 if we came from above?
+
+            // The issue "dropped on 4, placed on 3" implies it went BEFORE 4 when it should have gone AFTER?
+            // Or it went before 3?
+
+            // If I have 1, 2, 3, 4.
+            // Select 1, 2. Drag to 4.
+            // Remove 1, 2. List: 3, 4.
+            // Target is 4 (originally index 3).
+            // Adjustment: 3 - 2 (removed) = 1.
+            // Insert at 1.
+            // List: 3, [1, 2], 4.
+            // Result: 3, 1, 2, 4.
+            // User says: "place on 4 they get placed on 3". 
+            // If "on 3" means "replaces 3" or "before 3"?
+            // If result is 3, 1, 2, 4. It effectively placed them before 4.
+            // If user wanted them AT THE END (after 4), they would expect 3, 4, 1, 2.
+
+            // To fix this: If we are dragging DOWN (target > source), we likely want to insert AFTER calculation.
+            // But we have multiple sources.
+
+            // Heuristic: If the target index > average source index, we are moving down.
+            // If moving down, we want to insert at `adjustedInsertIndex + 1`?
+            // EXCEPT if we are modifying the implementation of `handleDragEnd` in Timeline.tsx.
+            // In Timeline.tsx, we pass `newIndex` which is the index of `over`.
+
+            // Let's modify the adjustment logic.
+            // If we assume the user intends to place "at the position of the target", 
+            // and sortable strategy usually stays "before".
+
+            // Let's use a simpler "adjust index" logic.
+            // We removed `sortedIndices.length` items.
+            // We need to map `insertAtIndex` to the new array.
+
+            let adjustedInsertIndex = insertAtIndex;
+            console.log('moveSprites Start:', { indices, insertAtIndex, initialAdjusted: adjustedInsertIndex });
+
+            sortedIndices.forEach(removedIdx => {
+                if (removedIdx < insertAtIndex) {
+                    adjustedInsertIndex--;
+                }
+            });
+            console.log('After Removal Adjustment:', adjustedInsertIndex);
+
+            // FIX: If we are moving items from "above" to "below", the `insertAtIndex` (which is the index of the item we dropped ON)
+            // will shift up (decrement) because of the removals.
+            // Resulting in insertion BEFORE the target.
+            // If we want to insert AFTER the target when moving down, we might need +1?
+            // But usually DND treats "over" as "swap with".
+
+            // If I use standard array move logic:
+            // When moving 0 to 3.
+            // [0, 1, 2, 3].
+            // Remove 0. [1, 2, 3].
+            // Insert at 3. [1, 2, 3, 0].
+            // My default logic: Target 3. 3 > 0, so adjust? 3-1=2.
+            // Insert at 2. [1, 2, 0, 3]. 
+            // So default logic inserts BEFORE target.
+
+            // If I want to insert AFTER target when moving down:
+            const isMovingDown = indices[0] < insertAtIndex; // Simple check using first item
+
+            if (isMovingDown) {
+                // When moving down, we want to insert AFTER the target item (which has shifted index)
+                // Or rather, we want the visual effect of "taking the slot of the target".
+                // But since the target shifted up, "taking its slot" means index.
+
+                // If I want to go to the END.
+                // I drop on 4. 4 is at index 1.
+                // I want index 2.
+                // My calc gave 1.
+                // So I need +1.
+                adjustedInsertIndex++;
+            }
+            console.log('Final Adjusted Index:', adjustedInsertIndex);
+
+            // Ensure bounds
+            adjustedInsertIndex = Math.max(0, Math.min(adjustedInsertIndex, newSprites.length));
+
+            // Insert
+            newSprites.splice(adjustedInsertIndex, 0, ...pickedSprites);
+
+            console.log('moveSprites Result IDs:', newSprites.map(s => s.id));
+
+            return newSprites;
+        });
+    }, []);
+
     // Animation Playback
     // Animation Playback with RAF
     const lastFrameTimeRef = useRef<number>(0);
@@ -865,6 +1017,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const importMultipleFromJSON = useCallback((files: { name: string; pixels: (string | null)[] }[]) => {
         let nextSprites = [...sprites];
         let currentActiveId = activeSpriteId;
+        const newIds: number[] = [];
 
         let reachedLimit = false;
 
@@ -886,6 +1039,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 };
                 // Make this replacement undoable immediately
                 nextSprites = saveHistory(nextSprites, activeSprite.id);
+                newIds.push(activeSprite.id);
             } else {
                 // ADD NEW: For subsequent files or if current wasn't blank
                 const newId = Math.max(...nextSprites.map(s => s.id), -1) + 1;
@@ -899,6 +1053,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 // Always append to the end
                 nextSprites.push(newSprite);
                 currentActiveId = newId;
+                newIds.push(newId);
             }
         });
 
@@ -907,8 +1062,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
 
         setSprites(nextSprites);
-        setActiveSpriteId(currentActiveId);
-    }, [activeSpriteId, saveHistory, setActiveSpriteId, sprites]);
+        return newIds;
+    }, [activeSpriteId, saveHistory, sprites]);
 
     const clearCanvas = useCallback(() => {
         // Update pixel data AND save history immediately (atomic action)
@@ -969,7 +1124,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 setFps,
                 brushSize,
                 setBrushSize,
-                addSelectionBatch
+                addSelectionBatch,
+                moveSprites
             }}
         >
             {children}

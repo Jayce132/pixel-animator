@@ -231,6 +231,7 @@ body {
     align-items: center;
     min-width: 0;
     /* Prevent flex blowout */
+    user-select: none;
 }
 
 /* Spacers for centering */
@@ -279,12 +280,6 @@ body {
 .timeline-frame.dragging {
     opacity: 0;
     pointer-events: none;
-}
-
-.timeline-frame.inactive-batch {
-    opacity: 0.4;
-    filter: grayscale(0.5);
-    /* Optional: desaturate slightly too */
 }
 
 .drag-ghost {
@@ -1414,4 +1409,24 @@ body {
     transform: scale(1.1);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
     z-index: 100;
+}
+
+/* Timeline Selection */
+.timeline-frame.selected {
+    box-shadow: 0 0 0 2px #3b82f6, 0 0 8px rgba(59, 130, 246, 0.6) !important;
+    border-color: #3b82f6 !important;
+    z-index: 20 !important;
+}
+
+/* Ghost Frames for Multi-Duplicate */
+.timeline-frame.ghost {
+    opacity: 0.5;
+    border: 1px dashed var(--text-muted) !important;
+    background-color: var(--panel-bg);
+}
+
+/* Ensure ghost with 'add-new' style (the one with +) looks correct */
+.timeline-frame.ghost.add-new {
+    opacity: 0.7;
+    border: 1px dashed var(--accent-color) !important;
 }

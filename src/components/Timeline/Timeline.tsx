@@ -26,6 +26,7 @@ export const Timeline: React.FC = () => {
         duplicateSprite,
         deleteSprite,
         moveSprite,
+        moveSprites,
         isPlaying,
         setIsPlaying,
         isOnionSkinning,
@@ -35,16 +36,242 @@ export const Timeline: React.FC = () => {
         setFps
     } = useEditor();
 
+    // Selection Mode State
+    const [isSelectionMode, setIsSelectionMode] = React.useState(false);
+    const [selectedSpriteIds, setSelectedSpriteIds] = React.useState<Set<number>>(new Set());
+
+    // Long Press / Paint Selection State
+    const [isPaintSelecting, setIsPaintSelecting] = React.useState(false);
+    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isPointerDownRef = React.useRef(false); // Track if pointer is actually down
+    const isPaintSelectingRef = React.useRef(false);
+    const dragStartSpriteIdRef = React.useRef<number | null>(null);
+    const initialSelectedIdsRef = React.useRef<Set<number>>(new Set());
+    const targetSelectionStateRef = React.useRef<boolean>(true); // true = add, false = remove
+
+    const handleFramePointerDown = React.useCallback((e: React.PointerEvent, _index: number, sprite: any) => {
+        isPointerDownRef.current = true;
+        const pointerId = e.pointerId;
+        const currentTarget = e.currentTarget;
+
+        // Start Long Press Timer
+        longPressTimerRef.current = setTimeout(() => {
+            if (isPointerDownRef.current) {
+                // Long press detected!
+                isPaintSelectingRef.current = true;
+                setIsPaintSelecting(true);
+                setIsSelectionMode(true);
+
+                // CAPTURE START STATE for reversible selection
+                dragStartSpriteIdRef.current = sprite.id;
+                initialSelectedIdsRef.current = new Set(selectedSpriteIds);
+                // Smart Paint: first frame determines mode
+                const targetState = !selectedSpriteIds.has(sprite.id);
+                targetSelectionStateRef.current = targetState;
+
+                // Provide immediate feedback for the first frame
+                setSelectedSpriteIds(prev => {
+                    const next = new Set(prev);
+                    if (targetState) next.add(sprite.id);
+                    else next.delete(sprite.id);
+                    return next;
+                });
+
+                // HIJACK: Kill any ongoing dnd-kit drag by firing synthetic events.
+                // PointerSensor listens for pointerup/pointermove on the document/window.
+                const cancelEvent = { bubbles: true, cancelable: true };
+                window.dispatchEvent(new PointerEvent('pointerup', cancelEvent));
+                window.dispatchEvent(new MouseEvent('mouseup', cancelEvent));
+                document.dispatchEvent(new PointerEvent('pointerup', cancelEvent));
+                document.dispatchEvent(new MouseEvent('mouseup', cancelEvent));
+
+                // IMPORTANT: Release pointer capture so that onPointerEnter 
+                // fires on other frames during the drag.
+                if (currentTarget instanceof Element) {
+                    try {
+                        currentTarget.releasePointerCapture(pointerId);
+                    } catch (err) {
+                        // Ignore errors if capture was already released
+                    }
+                }
+            }
+        }, 500); // 500ms for long press
+    }, [selectedSpriteIds]);
+
+    const handleFramePointerUp = React.useCallback((e: React.PointerEvent) => {
+        // HIJACK PROTECTION: Ignore synthetic events from our own drag-killing logic
+        if (e.nativeEvent && e.nativeEvent.isTrusted === false) return;
+
+        isPointerDownRef.current = false;
+
+        // Clear timer
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+
+        // End paint selecting
+        if (isPaintSelecting) {
+            wasPaintSelectingRef.current = true;
+            setIsPaintSelecting(false);
+            isPaintSelectingRef.current = false;
+            dragStartSpriteIdRef.current = null;
+            initialSelectedIdsRef.current = new Set();
+            // reset after a tick so click handler sees it
+            setTimeout(() => { wasPaintSelectingRef.current = false; }, 100);
+        }
+    }, [isPaintSelecting]);
+
+    const handleFramePointerEnter = React.useCallback((_e: React.PointerEvent, _index: number, sprite: any) => {
+        if (isPaintSelecting && isPointerDownRef.current) {
+            // Paint selection!
+            setSelectedSpriteIds(prev => {
+                if (prev.has(sprite.id)) return prev;
+                const newSet = new Set(prev);
+                newSet.add(sprite.id);
+                return newSet;
+            });
+        }
+    }, [isPaintSelecting]);
+
+    // HIT-TEST STRATEGY: Global pointermove listener to bypass Pointer Capture issues
+    React.useEffect(() => {
+        if (!isPaintSelecting) return;
+
+        const handleGlobalPointerMove = (e: PointerEvent) => {
+            // Find element at coordinates
+            const element = document.elementFromPoint(e.clientX, e.clientY);
+            if (!element) return;
+
+            // Find closest selectable frame
+            const frame = element.closest('[data-selectable-id]');
+            if (frame) {
+                const idStr = frame.getAttribute('data-selectable-id');
+                if (idStr && dragStartSpriteIdRef.current !== null) {
+                    const currentId = parseInt(idStr, 10);
+                    const targetSprite = sprites.find(s => s.id === currentId);
+                    if (!targetSprite) return;
+
+                    // Calculate range between start and current
+                    const startIdx = sprites.findIndex(s => s.id === dragStartSpriteIdRef.current);
+                    const endIdx = sprites.indexOf(targetSprite);
+
+                    if (startIdx !== -1 && endIdx !== -1) {
+                        const min = Math.min(startIdx, endIdx);
+                        const max = Math.max(startIdx, endIdx);
+                        const rangeIds = sprites.slice(min, max + 1).map(s => s.id);
+
+                        const nextSelection = new Set(initialSelectedIdsRef.current);
+
+                        if (targetSelectionStateRef.current) {
+                            // ADD mode: New = Initial ∪ Range
+                            rangeIds.forEach(id => nextSelection.add(id));
+                        } else {
+                            // REMOVE mode: New = Initial \ Range
+                            rangeIds.forEach(id => nextSelection.delete(id));
+                        }
+
+                        if (nextSelection.size !== selectedSpriteIds.size ||
+                            ![...nextSelection].every(id => selectedSpriteIds.has(id))) {
+                            setSelectedSpriteIds(nextSelection);
+                        }
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('pointermove', handleGlobalPointerMove);
+        return () => {
+            window.removeEventListener('pointermove', handleGlobalPointerMove);
+        };
+    }, [isPaintSelecting, sprites]);
+
+    // AUTO-EXIT Selection Mode if selection becomes empty
+    React.useEffect(() => {
+        if (isSelectionMode && selectedSpriteIds.size === 0) {
+            setIsSelectionMode(false);
+        }
+    }, [isSelectionMode, selectedSpriteIds.size]);
+
     // Stable handler for frame clicks to prevent re-renders
-    const handleFrameMouseDown = React.useCallback((e: React.MouseEvent, index: number, sprite: any) => {
+    const handleFrameMouseDown = React.useCallback((_e: React.MouseEvent, index: number, sprite: any) => {
+        // We no longer block mousedown in selection mode.
+        // This allows dnd-kit to pick up the drag for moving groups.
+        // Toggling still happens on handleFrameClick.
+
         setIsPlaying(false);
         const targetBatch = Math.floor(index / 8);
         setCurrentBatch(prev => {
             if (targetBatch !== prev) return targetBatch;
             return prev;
         });
-        setActiveSpriteId(sprite.id);
-    }, [setIsPlaying, setActiveSpriteId]);
+        // Only set active if we are NOT finishing a paint selection
+        if (!isPaintSelecting) {
+            setActiveSpriteId(sprite.id);
+        }
+    }, [setIsPlaying, setActiveSpriteId, isPaintSelecting]);
+
+    const wasPaintSelectingRef = React.useRef(false);
+
+    const handleFrameClick = React.useCallback((_e: React.MouseEvent, _index: number, sprite: any) => {
+        if (wasPaintSelectingRef.current) {
+            // Prevent click processing if we just finished a paint selection
+            return;
+        }
+
+        if (isSelectionMode) {
+            // Toggle selection on click
+            setSelectedSpriteIds(prev => {
+                const newSet = new Set(prev);
+                if (newSet.has(sprite.id)) {
+                    newSet.delete(sprite.id);
+                } else {
+                    newSet.add(sprite.id);
+                }
+                return newSet;
+            });
+        }
+    }, [isSelectionMode]);
+
+    const handleBulkDelete = () => {
+        if (selectedSpriteIds.size === 0) return;
+
+        // Convert Set to Array for processing
+        const idsToDelete = Array.from(selectedSpriteIds);
+
+        // We'll iterate and delete, but since deleteSprite might change the array causing index shifts if done by index,
+        // we should rely on IDs. The context deleteSprite takes an ID.
+        // We need to be careful about the active sprite being deleted.
+
+        idsToDelete.forEach(id => {
+            deleteSprite(id);
+        });
+
+        setSelectedSpriteIds(new Set());
+        setPendingDeleteId(null);
+    };
+
+    const handleBulkDuplicate = React.useCallback(() => {
+        const sortedSelected = sprites
+            .filter(s => selectedSpriteIds.has(s.id))
+            .sort((a, b) => sprites.indexOf(a) - sprites.indexOf(b));
+
+        if (sortedSelected.length === 0) return;
+
+        const importData = sortedSelected.map(s => ({
+            name: `${s.name} (Copy)`,
+            pixels: s.pixelData
+        }));
+
+        const newIds = importMultipleFromJSON(importData);
+        // Switch selection to new duplicates
+        setSelectedSpriteIds(new Set(newIds));
+
+        // Ensure the first of the duplications is the active frame
+        if (newIds.length > 0) {
+            setActiveSpriteId(newIds[0]);
+        }
+    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId]);
 
     const handleAddFrameMouseDown = React.useCallback(() => {
         setIsPlaying(false);
@@ -232,12 +459,26 @@ export const Timeline: React.FC = () => {
             activationConstraint: {
                 distance: 5, // Requires 5px movement to start drag, prevents accidental drag on click
             },
+            // Disable sensor if paint selecting
+            // But wait, DndContext sensors prop needs to be updated.
+            // Actually, we can just return false from a filter or similar?
+            // Or just pass `disabled` to SortableContext?
+            // Passing disabled to SortableContext disables Sorting, but maybe not the Drag initiating?
+            // If we disable SortableContext, the items become non-draggable.
+            // Let's try disabling SortableContext first as it's cleaner.
         })
     );
 
     const [isDragCoolingDown, setIsDragCoolingDown] = React.useState(false);
 
     const handleDragStart = (event: DragStartEvent) => {
+        // Cancel long press timer if drag starts
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+
+        // Allow drag in selection mode now
         if (event.active.id !== undefined) {
             setActiveDragId(Number(event.active.id));
         }
@@ -267,20 +508,33 @@ export const Timeline: React.FC = () => {
         }, 500);
 
         if (over && active.id !== over.id) {
-            const oldIndex = sprites.findIndex(s => s.id === Number(active.id));
-            const newIndex = sprites.findIndex(s => s.id === Number(over.id));
+            const activeId = Number(active.id);
+            const overId = Number(over.id);
+            const oldIndex = sprites.findIndex(s => s.id === activeId);
+            const newIndex = sprites.findIndex(s => s.id === overId);
 
             if (oldIndex !== -1 && newIndex !== -1) {
-                moveSprite(oldIndex, newIndex);
+                // Check if dragging part of selection
+                if (isSelectionMode && selectedSpriteIds.has(activeId)) {
+                    // Move ALL selected sprites
+                    const selectedIndices = sprites
+                        .map((s, i) => selectedSpriteIds.has(s.id) ? i : -1)
+                        .filter(i => i !== -1);
+
+                    console.log('Moving Sprites:', { selectedIndices, newIndex });
+                    moveSprites(selectedIndices, newIndex);
+                } else {
+                    // Single move
+                    moveSprite(oldIndex, newIndex);
+                }
             }
         }
     };
 
-    // Auto-scroll effect
+    // Auto-scroll effect (filmstrip)
     React.useEffect(() => {
         const container = timelineRef.current?.querySelector('.timeline-frame-list') as HTMLElement;
-        if (container && activeDragId === null && !isDragCoolingDown) {
-            // activeDragId checks drag, isDragCoolingDown checks pause
+        if (container && activeDragId === null && !isDragCoolingDown && !isPointerDownRef.current) {
             const index = sprites.findIndex(s => s.id === activeSpriteId);
             if (index === -1) return;
 
@@ -288,15 +542,29 @@ export const Timeline: React.FC = () => {
             const FRAME_SIZE = isSmall ? 75 : 100;
             const listWidth = container.clientWidth;
             const spacerWidth = (listWidth / 2) - (FRAME_SIZE / 2);
-            const targetScroll = (index * FRAME_SIZE) + (FRAME_SIZE / 2) - (listWidth / 2) + spacerWidth;
 
-            container.scrollTo({
-                left: targetScroll,
-                behavior: isPlaying ? 'auto' : 'smooth'
-            });
+            // Calculate where the frame is RELATIVE to the container's current scroll
+            const frameLeft = (index * FRAME_SIZE) + spacerWidth;
+            const scrollLeft = container.scrollLeft;
+            const frameOffset = frameLeft - scrollLeft;
+
+            // Buffer: Only scroll if within 2 frames of either edge
+            const BUFFER = FRAME_SIZE * 2;
+            const isNearLeft = frameOffset < BUFFER;
+            const isNearRight = frameOffset > listWidth - BUFFER - FRAME_SIZE;
+
+            if (isPlaying) {
+                // ALWAYS CENTER during playback for smooth filmstrip
+                const targetScroll = frameLeft - (listWidth / 2) + (FRAME_SIZE / 2);
+                container.scrollTo({ left: targetScroll, behavior: 'auto' });
+            } else if (isNearLeft || isNearRight) {
+                // ENSURE VISIBLE during editing: only hop if near edges
+                const targetScroll = frameLeft - (listWidth / 2) + (FRAME_SIZE / 2);
+                container.scrollTo({ left: targetScroll, behavior: 'smooth' });
+            }
         }
         prevActiveIdRef.current = activeSpriteId;
-    }, [activeSpriteId, isPlaying, sprites.length, activeDragId, isDragCoolingDown]);
+    }, [activeSpriteId, isPlaying, sprites.length, activeDragId, isDragCoolingDown, isPointerDownRef]);
 
     React.useEffect(() => {
         // Don't auto-switch batch while dragging or cooling down
@@ -333,9 +601,6 @@ export const Timeline: React.FC = () => {
         }, 400);
     }, [setFps]);
 
-    // Overlay sprite 
-    const activeDragSprite = sprites.find(s => s.id === activeDragId);
-
     return (
         <div ref={timelineRef} className="timeline-section">
             <div className="timeline-header">
@@ -353,27 +618,58 @@ export const Timeline: React.FC = () => {
                     >
                         Onion
                     </button>
-                    <button
-                        className={`control-btn-small ${pendingDeleteId === activeSpriteId ? 'delete-confirm' : ''}`}
-                        onClick={() => {
-                            if (sprites.length <= 1) return;
-                            if (pendingDeleteId === activeSpriteId) {
-                                deleteSprite(activeSpriteId);
-                                setPendingDeleteId(null);
-                            } else {
-                                setPendingDeleteId(activeSpriteId);
-                            }
-                        }}
-                        title="Delete Frame"
-                        style={{
-                            marginLeft: '8px',
-                            backgroundColor: pendingDeleteId === activeSpriteId ? '#ff4444' : '',
-                            color: pendingDeleteId === activeSpriteId ? 'white' : ''
-                        }}
-                        disabled={sprites.length <= 1}
-                    >
-                        {pendingDeleteId === activeSpriteId ? 'Confirm' : 'Delete'}
-                    </button>
+
+                    {/* Selection Controls - Only show 'Done' when in mode */}
+                    {isSelectionMode && (
+                        <button
+                            className={`control-btn-small active`}
+                            onClick={() => {
+                                setIsSelectionMode(false);
+                                setSelectedSpriteIds(new Set()); // Clear on exit
+                            }}
+                            style={{ marginLeft: '8px' }}
+                        >
+                            Done
+                        </button>
+                    )}
+
+                    {isSelectionMode && selectedSpriteIds.size > 0 ? (
+                        <button
+                            className="control-btn-small delete-confirm"
+                            onClick={handleBulkDelete}
+                            style={{
+                                marginLeft: '8px',
+                                backgroundColor: '#ff4444',
+                                color: 'white'
+                            }}
+                        >
+                            Delete ({selectedSpriteIds.size})
+                        </button>
+                    ) : (
+                        <button
+                            className={`control-btn-small ${pendingDeleteId === activeSpriteId ? 'delete-confirm' : ''}`}
+                            onClick={() => {
+                                if (sprites.length <= 1) return;
+                                if (pendingDeleteId === activeSpriteId) {
+                                    deleteSprite(activeSpriteId);
+                                    setPendingDeleteId(null);
+                                } else {
+                                    setPendingDeleteId(activeSpriteId);
+                                }
+                            }}
+                            title="Delete Frame"
+                            style={{
+                                marginLeft: '8px',
+                                backgroundColor: pendingDeleteId === activeSpriteId ? '#ff4444' : '',
+                                color: pendingDeleteId === activeSpriteId ? 'white' : '',
+                                opacity: isSelectionMode ? 0.3 : 1,
+                                pointerEvents: isSelectionMode ? 'none' : 'auto'
+                            }}
+                            disabled={sprites.length <= 1 || isSelectionMode}
+                        >
+                            {pendingDeleteId === activeSpriteId ? 'Confirm' : 'Delete'}
+                        </button>
+                    )}
                 </div>
                 <div className="file-controls">
                     <button className="secondary-btn-small" onClick={handleExportPNG}>PNG</button>
@@ -438,9 +734,12 @@ export const Timeline: React.FC = () => {
                     <SortableContext
                         items={sprites.map(s => s.id)}
                         strategy={horizontalListSortingStrategy}
+                        // Disable sorting/dragging if we are in paint select mode
+                        disabled={isPaintSelecting}
                     >
                         {sprites.map((sprite, index) => {
-                            const isInBatch = index >= currentBatch * BATCH_SIZE && index < (currentBatch + 1) * BATCH_SIZE;
+                            const isMultiDrag = activeDragId !== null && selectedSpriteIds.has(activeDragId);
+
                             return (
                                 <React.Fragment key={sprite.id}>
                                     <SortableFrame
@@ -449,42 +748,113 @@ export const Timeline: React.FC = () => {
                                         sprite={sprite}
                                         isActive={activeDragId === null && sprite.id === activeSpriteId}
                                         onMouseDown={handleFrameMouseDown}
+                                        onClick={handleFrameClick}
+                                        onPointerDown={handleFramePointerDown}
+                                        onPointerUp={handleFramePointerUp}
+                                        onPointerEnter={handleFramePointerEnter}
                                         isDeletePending={pendingDeleteId === sprite.id}
-                                        isInBatch={isInBatch}
+                                        isSelected={selectedSpriteIds.has(sprite.id)}
+                                        forceDragging={isMultiDrag && selectedSpriteIds.has(sprite.id)}
+                                        disabled={isPaintSelecting}
                                     />
                                 </React.Fragment>
                             );
                         })}
                     </SortableContext>
 
-                    {/* Add Frame Button (Outside sortable context) */}
-                    {activeSprite && sprites.length < 64 && (
-                        <div style={{ display: 'inline-block' }}>
-                            <TimelineFrame
-                                sprite={activeSprite}
-                                isAdd={true}
-                                index={sprites.length}
-                                isActive={false}
-                                onMouseDown={handleAddFrameMouseDown}
-                            />
+                    {/* Add Frame / Mulit-Duplicate Button(s) */}
+                    {isSelectionMode && selectedSpriteIds.size > 0 ? (
+                        <div style={{ display: 'inline-flex' }}>
+                            {/* Render ghosts of selected sprites */}
+                            {(() => {
+                                // Sort selected IDs by index to maintain order
+                                const selectedSprites = sprites
+                                    .filter(s => selectedSpriteIds.has(s.id))
+                                    .sort((a, b) => {
+                                        const idxA = sprites.indexOf(a);
+                                        const idxB = sprites.indexOf(b);
+                                        return idxA - idxB;
+                                    });
+
+                                return selectedSprites.map((sprite, i) => (
+                                    <TimelineFrame
+                                        key={`ghost-${sprite.id}`}
+                                        sprite={sprite}
+                                        isAdd={i === 0} // Only first one has +
+                                        index={sprites.length + i} // Virtual index
+                                        isActive={false}
+                                        isGhost={true}
+                                        onMouseDown={i === 0 ? handleBulkDuplicate : () => { }} // Only first one clicks
+                                    />
+                                ));
+                            })()}
                         </div>
+                    ) : (
+                        activeSprite && sprites.length < 64 && (
+                            <div style={{ display: 'inline-block' }}>
+                                <TimelineFrame
+                                    sprite={activeSprite}
+                                    isAdd={true}
+                                    index={sprites.length}
+                                    isActive={false}
+                                    onMouseDown={handleAddFrameMouseDown}
+                                />
+                            </div>
+                        )
                     )}
                     <div className="timeline-spacer" />
                 </div>
 
                 <DragOverlay>
-                    {activeDragSprite ? (
-                        <div className="timeline-frame-wrapper" style={{ opacity: 0.8 }}>
+                    {activeDragId !== null ? (() => {
+                        // Check if dragging part of selection
+                        if (isSelectionMode && selectedSpriteIds.has(activeDragId)) {
+                            const selectedSprites = sprites
+                                .filter(s => selectedSpriteIds.has(s.id))
+                                .sort((a, b) => {
+                                    const idxA = sprites.indexOf(a);
+                                    const idxB = sprites.indexOf(b);
+                                    return idxA - idxB;
+                                });
+
+                            return (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                    {selectedSprites.map((sprite, i) => (
+                                        <TimelineFrame
+                                            key={`overlay-${sprite.id}`}
+                                            sprite={sprite}
+                                            index={i}
+                                            isActive={false}
+                                            isSelected={true}
+                                            onMouseDown={() => { }}
+                                            onClick={() => { }}
+                                            onPointerDown={() => { }}
+                                            onPointerUp={() => { }}
+                                            onPointerEnter={() => { }}
+                                        />
+                                    ))}
+                                </div>
+                            );
+                        }
+
+                        // Single item drag
+                        const sprite = sprites.find(s => s.id === activeDragId);
+                        if (!sprite) return null;
+                        return (
                             <TimelineFrame
-                                sprite={activeDragSprite}
-                                index={sprites.findIndex(s => s.id === activeDragSprite.id)}
+                                sprite={sprite}
+                                index={0} // Index doesn't matter for overlay
                                 isActive={true}
                                 onMouseDown={() => { }}
+                                onClick={() => { }}
+                                onPointerDown={() => { }}
+                                onPointerUp={() => { }}
+                                onPointerEnter={() => { }}
                             />
-                        </div>
-                    ) : null}
+                        );
+                    })() : null}
                 </DragOverlay>
             </DndContext>
-        </div>
+        </div >
     );
 };
