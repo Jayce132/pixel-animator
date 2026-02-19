@@ -18,6 +18,7 @@ interface SortableFrameProps {
     onPointerUp?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     onPointerEnter?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     disabled?: boolean;
+    previewPixels?: (string | null)[];
 }
 
 export const SortableFrame: React.FC<SortableFrameProps> = ({
@@ -33,7 +34,8 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
     onPointerDown,
     onPointerUp,
     onPointerEnter,
-    disabled = false
+    disabled = false,
+    previewPixels
 }) => {
     const {
         attributes,
@@ -68,6 +70,7 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
         >
             <TimelineFrame
                 sprite={sprite}
+                previewPixels={previewPixels}
                 index={index}
                 isActive={isActive}
                 isDeletePending={isDeletePending}

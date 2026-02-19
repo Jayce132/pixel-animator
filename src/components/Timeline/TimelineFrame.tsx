@@ -4,6 +4,7 @@ import type { Sprite } from '../../types';
 
 interface TimelineFrameProps {
     sprite: Sprite;
+    previewPixels?: (string | null)[];
     isActive: boolean;
     onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
     onClick?: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
@@ -19,6 +20,7 @@ interface TimelineFrameProps {
 
 export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     sprite,
+    previewPixels,
     isActive,
     onMouseDown,
     onClick,
@@ -43,7 +45,8 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
         // Clear previous content
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        sprite.pixelData.forEach((color, i) => {
+        const pixels = previewPixels ?? sprite.pixelData.map((baseColor, i) => sprite.overlayPixelData[i] ?? baseColor);
+        pixels.forEach((color, i) => {
             if (color) {
                 const x = (i % GRID_SIZE);
                 const y = Math.floor(i / GRID_SIZE);
@@ -52,7 +55,7 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
             }
         });
 
-    }, [sprite.pixelData]);
+    }, [previewPixels, sprite.pixelData, sprite.overlayPixelData]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
         // We shouldn't stop propagation here as it might interfere with dnd-kit which listens on parent

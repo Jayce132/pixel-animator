@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { TOTAL_PIXELS, PRESET_COLORS, GRID_SIZE } from '../types';
 import type { Sprite, Tool } from '../types';
 
+type Layer = 'base' | 'top';
+
 interface EditorContextType {
     sprites: Sprite[];
     activeSpriteId: number;
@@ -40,7 +42,7 @@ interface EditorContextType {
     setIsPlaying: (playing: boolean) => void;
     isOnionSkinning: boolean;
     setIsOnionSkinning: (on: boolean) => void;
-    importMultipleFromJSON: (files: { name: string; pixels: (string | null)[] }[]) => number[];
+    importMultipleFromJSON: (files: { name: string; pixels: (string | null)[]; overlayPixels?: (string | null)[] }[]) => number[];
     stamp: () => void;
     isStamping: boolean;
     fps: number;
@@ -48,6 +50,11 @@ interface EditorContextType {
     brushSize: 1 | 2;
     setBrushSize: (size: 1 | 2) => void;
     addSelectionBatch: (indices: number[]) => void;
+    cancelStroke: () => void;
+    activeLayer: Layer;
+    setActiveLayer: (layer: Layer) => void;
+    isOverlayStacked: boolean;
+    setIsOverlayStacked: (stacked: boolean) => void;
 }
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
@@ -58,8 +65,11 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             id: 0,
             name: 'Sprite 0',
             pixelData: new Array(TOTAL_PIXELS).fill(null),
+            overlayPixelData: new Array(TOTAL_PIXELS).fill(null),
             history: [new Array(TOTAL_PIXELS).fill(null)],
-            redoHistory: []
+            redoHistory: [],
+            overlayHistory: [new Array(TOTAL_PIXELS).fill(null)],
+            overlayRedoHistory: []
         }
     ]);
     const [activeSpriteId, setActiveSpriteId] = useState<number>(0);
@@ -74,19 +84,26 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [isStamping, setIsStamping] = useState(false);
     const [fps, setFps] = useState(8);
     const [brushSize, setBrushSize] = useState<1 | 2>(2);
+    const [activeLayer, setActiveLayer] = useState<Layer>('base');
+    const [isOverlayStacked, setIsOverlayStacked] = useState(true);
 
     // Helper to save history
     const saveHistory = useCallback((currentSprites: Sprite[], spriteId: number) => {
         return currentSprites.map(s => {
             if (s.id === spriteId) {
                 const newHistory = [...s.history];
+                const newOverlayHistory = [...s.overlayHistory];
                 if (newHistory.length > 20) newHistory.shift();
+                if (newOverlayHistory.length > 20) newOverlayHistory.shift();
                 newHistory.push([...s.pixelData]); // Save COPY of pixelData
+                newOverlayHistory.push([...s.overlayPixelData]);
 
                 return {
                     ...s,
                     history: newHistory,
-                    redoHistory: [] // Clear redo on new action
+                    overlayHistory: newOverlayHistory,
+                    redoHistory: [], // Clear redo on new action
+                    overlayRedoHistory: []
                 };
             }
             return s;
@@ -120,6 +137,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }, []);
 
     const stamp = useCallback(() => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
         if (floatingLayerState.size > 0) {
             // Trigger Animation
             setIsStamping(true);
@@ -129,60 +147,62 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             setSprites(prevSprites => {
                 const nextSprites = prevSprites.map(sprite => {
                     if (sprite.id !== activeSpriteId) return sprite;
-                    const newPixelData = [...sprite.pixelData];
+                    const newPixelData = [...sprite[layerKey]];
                     floatingLayerState.forEach((color, idx) => {
                         newPixelData[idx] = color;
                     });
-                    return { ...sprite, pixelData: newPixelData };
+                    return { ...sprite, [layerKey]: newPixelData };
                 });
                 return saveHistory(nextSprites, activeSpriteId);
             });
             // DO NOT Clear floating layer (Stay floating)
         }
-    }, [floatingLayerState, activeSpriteId, saveHistory]);
+    }, [activeLayer, floatingLayerState, activeSpriteId, saveHistory]);
 
     const clearSelection = useCallback(() => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
         // Commits current floating layer and clears selection
         if (floatingLayerState.size > 0) {
             setSprites(prevSprites => {
                 const nextSprites = prevSprites.map(sprite => {
                     if (sprite.id !== activeSpriteId) return sprite;
-                    const newPixelData = [...sprite.pixelData];
+                    const newPixelData = [...sprite[layerKey]];
                     floatingLayerState.forEach((color, idx) => {
                         newPixelData[idx] = color;
                     });
-                    return { ...sprite, pixelData: newPixelData };
+                    return { ...sprite, [layerKey]: newPixelData };
                 });
                 return saveHistory(nextSprites, activeSpriteId);
             });
             setFloatingLayerState(new Map());
         }
         setSelectedPixelsState(new Set());
-    }, [floatingLayerState, activeSpriteId, saveHistory]);
+    }, [activeLayer, floatingLayerState, activeSpriteId, saveHistory]);
 
     const liftSelection = useCallback((pixelsOverride?: Set<number>) => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
         const pixelsToLift = pixelsOverride || selectedPixels;
 
         setSprites(prevSprites => {
             const nextSprites = prevSprites.map(sprite => {
                 if (sprite.id !== activeSpriteId) return sprite;
 
-                const newPixelData = [...sprite.pixelData];
+                const newPixelData = [...sprite[layerKey]];
                 const newFloatingLayer = new Map<number, string>();
 
                 pixelsToLift.forEach(idx => {
-                    if (sprite.pixelData[idx]) {
-                        newFloatingLayer.set(idx, sprite.pixelData[idx]);
+                    if (sprite[layerKey][idx]) {
+                        newFloatingLayer.set(idx, sprite[layerKey][idx]!);
                         newPixelData[idx] = null; // Clear from canvas
                     }
                 });
 
                 setFloatingLayerState(newFloatingLayer);
-                return { ...sprite, pixelData: newPixelData };
+                return { ...sprite, [layerKey]: newPixelData };
             });
             return saveHistory(nextSprites, activeSpriteId);
         });
-    }, [activeSpriteId, selectedPixels, saveHistory]);
+    }, [activeLayer, activeSpriteId, selectedPixels, saveHistory]);
 
     const flipSelectionHorizontal = useCallback(() => {
         if (floatingLayerState.size === 0 && selectedPixels.size > 0) return;
@@ -399,16 +419,22 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 if (s.history.length <= 1) return s;
 
                 const newHistory = [...s.history];
+                const newOverlayHistory = [...s.overlayHistory];
                 const currentState = newHistory.pop(); // Pop current
                 const previousState = newHistory[newHistory.length - 1]; // Peek previous
+                const currentOverlayState = newOverlayHistory.pop();
+                const previousOverlayState = newOverlayHistory[newOverlayHistory.length - 1];
 
-                if (!currentState || !previousState) return s;
+                if (!currentState || !previousState || !currentOverlayState || !previousOverlayState) return s;
 
                 return {
                     ...s,
                     pixelData: [...previousState],
+                    overlayPixelData: [...previousOverlayState],
                     history: newHistory,
-                    redoHistory: [...s.redoHistory, currentState]
+                    overlayHistory: newOverlayHistory,
+                    redoHistory: [...s.redoHistory, currentState],
+                    overlayRedoHistory: [...s.overlayRedoHistory, currentOverlayState]
                 };
             }
             return s;
@@ -421,30 +447,59 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 if (s.redoHistory.length === 0) return s;
 
                 const newRedoHistory = [...s.redoHistory];
+                const newOverlayRedoHistory = [...s.overlayRedoHistory];
                 const nextState = newRedoHistory.pop();
+                const nextOverlayState = newOverlayRedoHistory.pop();
 
-                if (!nextState) return s;
+                if (!nextState || !nextOverlayState) return s;
 
                 const newHistory = [...s.history, nextState];
+                const newOverlayHistory = [...s.overlayHistory, nextOverlayState];
 
                 return {
                     ...s,
                     pixelData: [...nextState],
+                    overlayPixelData: [...nextOverlayState],
                     history: newHistory,
-                    redoHistory: newRedoHistory
+                    overlayHistory: newOverlayHistory,
+                    redoHistory: newRedoHistory,
+                    overlayRedoHistory: newOverlayRedoHistory
                 };
             }
             return s;
         }));
     }, [activeSpriteId]);
 
+    const cancelStroke = useCallback(() => {
+        setSprites(prevSprites => prevSprites.map(s => {
+            if (s.id === activeSpriteId) {
+                const lastHistory = s.history[s.history.length - 1];
+                const lastOverlayHistory = s.overlayHistory[s.overlayHistory.length - 1];
+                if (!lastHistory || !lastOverlayHistory) return s;
+
+                // Revert pixels to last history state
+                return {
+                    ...s,
+                    pixelData: [...lastHistory],
+                    overlayPixelData: [...lastOverlayHistory]
+                };
+            }
+            return s;
+        }));
+        // We do typically want to stop drawing, but let the caller handle setIsDrawing(false) 
+        // to avoid race conditions with effects if possible, or include it here?
+        // Let's just revert pixels here.
+    }, [activeSpriteId]);
+
     const activeSprite = sprites.find(s => s.id === activeSpriteId);
 
     const fill = useCallback((startIndex: number) => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
+
         // Floating Layer Fill
         if (selectedPixels.has(startIndex)) {
             // Calculate starting target color (Composite: Float > Base)
-            const baseStartColor = activeSprite?.pixelData[startIndex] || null;
+            const baseStartColor = activeSprite ? activeSprite[layerKey][startIndex] : null;
             const targetColor = floatingLayerState.has(startIndex) ? floatingLayerState.get(startIndex)! : baseStartColor;
 
             const replacementColor = currentColor;
@@ -468,7 +523,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
                 if (!selectedPixels.has(currentIndex)) continue;
 
-                const baseAtIdx = activeSprite?.pixelData[currentIndex] || null;
+                const baseAtIdx = activeSprite ? activeSprite[layerKey][currentIndex] : null;
                 const currentComposite = floatingLayerState.has(currentIndex) ? floatingLayerState.get(currentIndex)! : baseAtIdx;
 
                 if (currentComposite === targetColor) {
@@ -504,7 +559,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     setSprites(prevSprites => {
                         return prevSprites.map(sprite => {
                             if (sprite.id !== activeSpriteId) return sprite;
-                            const newPixelData = [...sprite.pixelData];
+                            const newPixelData = [...sprite[layerKey]];
                             let changed = false;
                             pixelsToChange.forEach(idx => {
                                 if (newPixelData[idx] !== null) {
@@ -513,8 +568,8 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                                 }
                             });
                             if (!changed) return sprite;
-                            // History save logic
-                            return saveHistory([{ ...sprite, pixelData: newPixelData }], activeSpriteId)[0];
+                            const updatedSprite = { ...sprite, [layerKey]: newPixelData };
+                            return saveHistory([updatedSprite], activeSpriteId)[0];
                         });
                     });
                 }
@@ -529,12 +584,12 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const nextSprites = prevSprites.map(sprite => {
                 if (sprite.id !== activeSpriteId) return sprite;
 
-                const targetColor = sprite.pixelData[startIndex];
+                const targetColor = sprite[layerKey][startIndex];
                 const replacementColor = currentColor; // Fill with current color
 
                 if (targetColor === replacementColor) return sprite;
 
-                const newPixelData = [...sprite.pixelData];
+                const newPixelData = [...sprite[layerKey]];
                 const queue = [startIndex];
                 const visited = new Set<number>();
 
@@ -562,7 +617,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     }
                 }
 
-                return { ...sprite, pixelData: newPixelData };
+                return { ...sprite, [layerKey]: newPixelData };
             });
 
             // Save history explicitly after fill
@@ -572,9 +627,10 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         // Legacy behavior: switch back to brush after fill
         setTool('brush');
-    }, [activeSpriteId, currentColor, saveHistory, selectedPixels, floatingLayerState]);
+    }, [activeLayer, activeSprite, activeSpriteId, currentColor, saveHistory, selectedPixels, floatingLayerState]);
 
     const updatePixel = useCallback((pixelIndex: number, maskConstraint: 'inside' | 'outside' | null = null) => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
         const targetColor = (currentTool === 'eraser' || currentColor === null) ? null : currentColor;
 
         // Calculate pixels based on brush size
@@ -637,7 +693,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (targetColor === null) {
                 setSprites(prevSprites => prevSprites.map(sprite => {
                     if (sprite.id !== activeSpriteId) return sprite;
-                    const newPixelData = [...sprite.pixelData];
+                    const newPixelData = [...sprite[layerKey]];
                     let changed = false;
                     filteredPixels.forEach(idx => {
                         // Only touch base if selected
@@ -663,7 +719,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                         }
                     });
                     if (!changed) return sprite;
-                    return saveHistory([{ ...sprite, pixelData: newPixelData }], activeSpriteId)[0];
+                    return saveHistory([{ ...sprite, [layerKey]: newPixelData }], activeSpriteId)[0];
                     // Note: saveHistory expects array, returns array. We take the first (and only) updated sprite.
                     // Wait, saveHistory takes (currentSprites, id). We need to pass the FULL list? 
                     // No, simpler: just return the sprite and let a separate effect save? 
@@ -694,6 +750,7 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 // So here we only paint pixels that are NOT in selection.
 
                 const newPixelData = [...sprite.pixelData];
+                const newLayerData = [...sprite[layerKey]];
                 let changed = false;
 
                 filteredPixels.forEach(idx => {
@@ -713,19 +770,19 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                         // REMOVED STRICT MASKING to allow 'Smart Masking' from Editor.tsx
                         // if (selectedPixels.size > 0 && !selectedPixels.has(idx)) return;
 
-                        if (newPixelData[idx] !== targetColor) {
-                            newPixelData[idx] = targetColor;
+                        if (newLayerData[idx] !== targetColor) {
+                            newLayerData[idx] = targetColor;
                             changed = true;
                         }
                     }
                 });
 
                 if (!changed) return sprite;
-                return { ...sprite, pixelData: newPixelData };
+                return { ...sprite, [layerKey]: newLayerData };
             }
             return sprite;
         }));
-    }, [activeSpriteId, currentTool, currentColor, selectedPixels, brushSize]);
+    }, [activeLayer, activeSpriteId, currentTool, currentColor, selectedPixels, brushSize]);
 
     const addSprite = useCallback(() => {
         setSprites(prev => {
@@ -738,8 +795,11 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 id: newId,
                 name: `Sprite ${newId}`,
                 pixelData: new Array(TOTAL_PIXELS).fill(null),
+                overlayPixelData: new Array(TOTAL_PIXELS).fill(null),
                 history: [new Array(TOTAL_PIXELS).fill(null)],
-                redoHistory: []
+                redoHistory: [],
+                overlayHistory: [new Array(TOTAL_PIXELS).fill(null)],
+                overlayRedoHistory: []
             };
             setActiveSpriteId(newId);
             return [...prev, newSprite];
@@ -757,22 +817,33 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
             const sourceSprite = prev[activeIndex];
             const newId = Math.max(...prev.map(s => s.id)) + 1;
+            const blank = new Array(TOTAL_PIXELS).fill(null);
+
+            const nextBase = isOverlayStacked
+                ? [...sourceSprite.pixelData]
+                : (activeLayer === 'base' ? [...sourceSprite.pixelData] : [...blank]);
+            const nextTop = isOverlayStacked
+                ? [...sourceSprite.overlayPixelData]
+                : (activeLayer === 'top' ? [...sourceSprite.overlayPixelData] : [...blank]);
 
             const newSprite: Sprite = {
                 ...sourceSprite,
                 id: newId,
                 name: `${sourceSprite.name} (Copy)`,
-                pixelData: [...sourceSprite.pixelData], // Deep copy pixel data
+                pixelData: nextBase,
+                overlayPixelData: nextTop,
                 // History? Typically we start fresh or copy. Let's start fresh to save memory.
-                history: [[...sourceSprite.pixelData]],
-                redoHistory: []
+                history: [[...nextBase]],
+                redoHistory: [],
+                overlayHistory: [[...nextTop]],
+                overlayRedoHistory: []
             };
 
             const newSprites = [...prev, newSprite]; // Always append to end
             setActiveSpriteId(newId);
             return newSprites;
         });
-    }, [activeSpriteId, setActiveSpriteId]);
+    }, [activeSpriteId, setActiveSpriteId, activeLayer, isOverlayStacked]);
 
     const deleteSprite = useCallback((idToDelete?: number) => {
         setSprites(prev => {
@@ -1010,11 +1081,11 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     }, [currentTool]);
 
-    const isSpriteBlank = (pixels: (string | null)[]) => {
-        return pixels.every(p => p === null);
+    const isSpriteBlank = (sprite: Sprite) => {
+        return sprite.pixelData.every(p => p === null) && sprite.overlayPixelData.every(p => p === null);
     };
 
-    const importMultipleFromJSON = useCallback((files: { name: string; pixels: (string | null)[] }[]) => {
+    const importMultipleFromJSON = useCallback((files: { name: string; pixels: (string | null)[]; overlayPixels?: (string | null)[] }[]) => {
         let nextSprites = [...sprites];
         let currentActiveId = activeSpriteId;
         const newIds: number[] = [];
@@ -1030,12 +1101,14 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const activeIndex = nextSprites.findIndex(s => s.id === currentActiveId);
             const activeSprite = nextSprites[activeIndex];
 
-            if (index === 0 && activeSprite && isSpriteBlank(activeSprite.pixelData)) {
+            if (index === 0 && activeSprite && isSpriteBlank(activeSprite)) {
                 // REPLACE: ONLY if first file AND current active frame is blank
                 nextSprites[activeIndex] = {
                     ...activeSprite,
                     pixelData: [...file.pixels],
-                    redoHistory: []
+                    overlayPixelData: file.overlayPixels ? [...file.overlayPixels] : new Array(TOTAL_PIXELS).fill(null),
+                    redoHistory: [],
+                    overlayRedoHistory: []
                 };
                 // Make this replacement undoable immediately
                 nextSprites = saveHistory(nextSprites, activeSprite.id);
@@ -1047,8 +1120,11 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     id: newId,
                     name: `Sprite ${nextSprites.length}`,
                     pixelData: [...file.pixels],
+                    overlayPixelData: file.overlayPixels ? [...file.overlayPixels] : new Array(TOTAL_PIXELS).fill(null),
                     history: [[...file.pixels]],
-                    redoHistory: []
+                    redoHistory: [],
+                    overlayHistory: [file.overlayPixels ? [...file.overlayPixels] : new Array(TOTAL_PIXELS).fill(null)],
+                    overlayRedoHistory: []
                 };
                 // Always append to the end
                 nextSprites.push(newSprite);
@@ -1066,18 +1142,19 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }, [activeSpriteId, saveHistory, sprites]);
 
     const clearCanvas = useCallback(() => {
+        const layerKey = activeLayer === 'base' ? 'pixelData' : 'overlayPixelData';
         // Update pixel data AND save history immediately (atomic action)
         setSprites(prevSprites => {
             const updated = prevSprites.map(s => {
                 if (s.id === activeSpriteId) {
-                    return { ...s, pixelData: new Array(TOTAL_PIXELS).fill(null) };
+                    return { ...s, [layerKey]: new Array(TOTAL_PIXELS).fill(null) };
                 }
                 return s;
             });
             // Save history for this atomic action
             return saveHistory(updated, activeSpriteId);
         });
-    }, [activeSpriteId, saveHistory]);
+    }, [activeLayer, activeSpriteId, saveHistory]);
 
     return (
         <EditorContext.Provider
@@ -1125,7 +1202,12 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 brushSize,
                 setBrushSize,
                 addSelectionBatch,
-                moveSprites
+                moveSprites,
+                cancelStroke,
+                activeLayer,
+                setActiveLayer,
+                isOverlayStacked,
+                setIsOverlayStacked
             }}
         >
             {children}

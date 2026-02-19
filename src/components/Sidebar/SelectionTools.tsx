@@ -11,17 +11,17 @@ export const SelectionTools: React.FC = () => {
         isStamping
     } = useEditor();
 
-    React.useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space') {
-                e.preventDefault();
-                stamp();
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [stamp]);
+    // Stamp Shortcut REMOVED (Moved to Global Hook)
+    // React.useEffect(() => {
+    //     const handleKeyDown = (e: KeyboardEvent) => {
+    //         if (e.code === 'Space') {
+    //             e.preventDefault();
+    //             stamp();
+    //         }
+    //     };
+    //     window.addEventListener('keydown', handleKeyDown);
+    //     return () => window.removeEventListener('keydown', handleKeyDown);
+    // }, [stamp]);
 
     return (
         <div className="palette-section">
@@ -35,7 +35,7 @@ export const SelectionTools: React.FC = () => {
             <div className="transform-controls">
                 <button
                     className={`action-btn ${isStamping ? 'active' : ''}`}
-                    title="Stamp (Space)"
+                    title="Stamp (Enter)"
                     onClick={stamp}
                     style={{ gridColumn: 'span 2', marginTop: '8px', fontSize: '0.85rem' }}
                 >

@@ -4,8 +4,11 @@ export interface Sprite {
     id: number;
     name: string;
     pixelData: PixelData;
+    overlayPixelData: PixelData;
     history: PixelData[];
     redoHistory: PixelData[];
+    overlayHistory: PixelData[];
+    overlayRedoHistory: PixelData[];
 }
 
 export type Tool = 'brush' | 'eraser' | 'fill' | 'select';

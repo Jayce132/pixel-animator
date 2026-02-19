@@ -2,7 +2,7 @@ import React from 'react';
 import { useEditor } from '../../contexts/EditorContext';
 import { TimelineFrame } from './TimelineFrame';
 import { SortableFrame } from './SortableFrame';
-import { GRID_SIZE } from '../../types';
+import { GRID_SIZE, TOTAL_PIXELS } from '../../types';
 import {
     DndContext,
     closestCenter,
@@ -33,8 +33,14 @@ export const Timeline: React.FC = () => {
         setIsOnionSkinning,
         importMultipleFromJSON,
         fps,
-        setFps
+        setFps,
+        activeLayer,
+        isOverlayStacked
     } = useEditor();
+
+    const getCompositePixelData = React.useCallback((sprite: { pixelData: (string | null)[]; overlayPixelData: (string | null)[] }) => {
+        return sprite.pixelData.map((base, i) => sprite.overlayPixelData[i] ?? base);
+    }, []);
 
     // Selection Mode State
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
@@ -42,15 +48,25 @@ export const Timeline: React.FC = () => {
 
     // Long Press / Paint Selection State
     const [isPaintSelecting, setIsPaintSelecting] = React.useState(false);
+    const [isFramePointerDown, setIsFramePointerDown] = React.useState(false);
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const isPointerDownRef = React.useRef(false); // Track if pointer is actually down
     const isPaintSelectingRef = React.useRef(false);
     const dragStartSpriteIdRef = React.useRef<number | null>(null);
     const initialSelectedIdsRef = React.useRef<Set<number>>(new Set());
     const targetSelectionStateRef = React.useRef<boolean>(true); // true = add, false = remove
+    const getPreviewPixels = React.useCallback((sprite: { pixelData: (string | null)[]; overlayPixelData: (string | null)[] }) => {
+        if (isOverlayStacked) {
+            // While selecting with pointer held, show top-only in stacked mode.
+            if (isPaintSelecting || (isSelectionMode && isFramePointerDown)) return sprite.overlayPixelData;
+            return getCompositePixelData(sprite);
+        }
+        return activeLayer === 'base' ? sprite.pixelData : sprite.overlayPixelData;
+    }, [activeLayer, getCompositePixelData, isOverlayStacked, isPaintSelecting, isSelectionMode, isFramePointerDown]);
 
     const handleFramePointerDown = React.useCallback((e: React.PointerEvent, _index: number, sprite: any) => {
         isPointerDownRef.current = true;
+        setIsFramePointerDown(true);
         const pointerId = e.pointerId;
         const currentTarget = e.currentTarget;
 
@@ -103,6 +119,7 @@ export const Timeline: React.FC = () => {
         if (e.nativeEvent && e.nativeEvent.isTrusted === false) return;
 
         isPointerDownRef.current = false;
+        setIsFramePointerDown(false);
 
         // Clear timer
         if (longPressTimerRef.current) {
@@ -121,6 +138,15 @@ export const Timeline: React.FC = () => {
             setTimeout(() => { wasPaintSelectingRef.current = false; }, 100);
         }
     }, [isPaintSelecting]);
+
+    React.useEffect(() => {
+        const handleWindowPointerUp = () => {
+            isPointerDownRef.current = false;
+            setIsFramePointerDown(false);
+        };
+        window.addEventListener('pointerup', handleWindowPointerUp);
+        return () => window.removeEventListener('pointerup', handleWindowPointerUp);
+    }, []);
 
     const handleFramePointerEnter = React.useCallback((_e: React.PointerEvent, _index: number, sprite: any) => {
         if (isPaintSelecting && isPointerDownRef.current) {
@@ -258,9 +284,15 @@ export const Timeline: React.FC = () => {
 
         if (sortedSelected.length === 0) return;
 
+        const blank = new Array(TOTAL_PIXELS).fill(null);
         const importData = sortedSelected.map(s => ({
             name: `${s.name} (Copy)`,
-            pixels: s.pixelData
+            pixels: isOverlayStacked
+                ? s.pixelData
+                : (activeLayer === 'base' ? s.pixelData : blank),
+            overlayPixels: isOverlayStacked
+                ? s.overlayPixelData
+                : (activeLayer === 'top' ? s.overlayPixelData : blank)
         }));
 
         const newIds = importMultipleFromJSON(importData);
@@ -271,7 +303,7 @@ export const Timeline: React.FC = () => {
         if (newIds.length > 0) {
             setActiveSpriteId(newIds[0]);
         }
-    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId]);
+    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId, activeLayer, isOverlayStacked]);
 
     const handleAddFrameMouseDown = React.useCallback(() => {
         setIsPlaying(false);
@@ -290,7 +322,8 @@ export const Timeline: React.FC = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        activeSprite.pixelData.forEach((color, i) => {
+        const composite = getCompositePixelData(activeSprite);
+        composite.forEach((color, i) => {
             if (color) {
                 const x = i % GRID_SIZE;
                 const y = Math.floor(i / GRID_SIZE);
@@ -322,7 +355,8 @@ export const Timeline: React.FC = () => {
         const jsonData = {
             width: GRID_SIZE,
             height: GRID_SIZE,
-            pixels: activeSprite.pixelData
+            pixels: activeSprite.pixelData,
+            overlayPixels: activeSprite.overlayPixelData
         };
         const jsonString = JSON.stringify(jsonData, null, 2);
         const blob = new Blob([jsonString], { type: 'application/json' });
@@ -342,13 +376,13 @@ export const Timeline: React.FC = () => {
         try {
             const results = await Promise.all(
                 filesArray.map(file => {
-                    return new Promise<{ name: string; pixels: (string | null)[] }>((resolve, reject) => {
+                    return new Promise<{ name: string; pixels: (string | null)[]; overlayPixels?: (string | null)[] }>((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = (event) => {
                             try {
                                 const json = JSON.parse(event.target?.result as string);
                                 if (json.pixels) {
-                                    resolve({ name: file.name, pixels: json.pixels });
+                                    resolve({ name: file.name, pixels: json.pixels, overlayPixels: json.overlayPixels });
                                 } else {
                                     reject(new Error(`Invalid JSON: ${file.name}`));
                                 }
@@ -389,6 +423,17 @@ export const Timeline: React.FC = () => {
 
     const [currentBatch, setCurrentBatch] = React.useState(0);
     const BATCH_SIZE = 8;
+    const handleTimelineWheel = React.useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        const container = timelineContainerRef.current;
+        if (!container) return;
+
+        // Map vertical wheel movement to horizontal timeline scrolling.
+        const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        if (delta !== 0) {
+            e.preventDefault();
+            container.scrollLeft += delta;
+        }
+    }, []);
 
     // Keyboard Shortcuts
     React.useEffect(() => {
@@ -400,24 +445,50 @@ export const Timeline: React.FC = () => {
 
             if (isInput) return;
 
-            if (e.key === ',' || e.key === '<') {
-                const currentId = activeSpriteIdRef.current;
-                const idx = spritesRef.current.findIndex(s => s.id === currentId);
-                if (idx !== -1) {
-                    const count = spritesRef.current.length;
-                    const prevIdx = (idx - 1 + count) % count;
-                    setActiveSpriteId(spritesRef.current[prevIdx].id);
+            // Navigation shortcuts moved to useKeyboardShortcuts
+            // if (e.key === ',' || e.key === '<') { ... }
+            // if (e.key === '.' || e.key === '>') { ... }
+            // Duplicate Shortcuts (Global Context but dependent on Timeline Selection)
+            const isCmd = e.metaKey || e.ctrlKey;
+            const isShift = e.shiftKey;
+
+            if (isShift && e.code === 'KeyN') {
+                e.preventDefault();
+                if (selectedSpriteIds.size > 0) {
+                    handleBulkDuplicate();
+                } else {
+                    duplicateSprite();
                 }
             }
-            if (e.key === '.' || e.key === '>') {
-                const currentId = activeSpriteIdRef.current;
-                const idx = spritesRef.current.findIndex(s => s.id === currentId);
-                if (idx !== -1) {
-                    const count = spritesRef.current.length;
-                    const nextIdx = (idx + 1) % count;
-                    setActiveSpriteId(spritesRef.current[nextIdx].id);
+
+            // Select All Frames (Cmd+A)
+            if (isCmd && e.code === 'KeyA') {
+                e.preventDefault();
+                setIsSelectionMode(true); // Ensure selection mode is on
+                setSelectedSpriteIds(new Set(spritesRef.current.map(s => s.id)));
+            }
+
+            // Deselect Frames (Cmd+Shift+A)
+            if (isCmd && isShift && e.code === 'KeyA') {
+                e.preventDefault();
+                if (selectedSpriteIds.size > 0) {
+                    setSelectedSpriteIds(new Set());
+                    setIsSelectionMode(false);
                 }
             }
+
+            // Bulk Delete (Shift+Delete)
+            if (isShift && (e.code === 'Delete' || e.code === 'Backspace')) {
+                e.preventDefault();
+                // If selection exists, bulk delete
+                if (selectedSpriteIds.size > 0) {
+                    handleBulkDelete();
+                } else {
+                    // Just delete active (fallback handled by button normally, but shortcut useful)
+                    deleteSprite(activeSpriteIdRef.current);
+                }
+            }
+
             if (/^[1-8]$/.test(e.key)) {
                 const localIndex = parseInt(e.key) - 1;
                 const globalIndex = (currentBatch * BATCH_SIZE) + localIndex;
@@ -447,7 +518,7 @@ export const Timeline: React.FC = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [setActiveSpriteId, currentBatch]);
+    }, [setActiveSpriteId, currentBatch, selectedSpriteIds, duplicateSprite, handleBulkDuplicate]);
 
     // Auto-scroll to active sprite
     const prevActiveIdRef = React.useRef(activeSpriteId);
@@ -698,7 +769,12 @@ export const Timeline: React.FC = () => {
                     interval: 10       // Update 10ms
                 }}
             >
-                <div ref={timelineContainerRef} className="timeline-frame-list" style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}>
+                <div
+                    ref={timelineContainerRef}
+                    className="timeline-frame-list"
+                    onWheel={handleTimelineWheel}
+                    style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}
+                >
                     <div className="timeline-spacer" />
                     <div style={{
                         display: 'flex',
@@ -746,6 +822,7 @@ export const Timeline: React.FC = () => {
                                         id={sprite.id}
                                         index={index}
                                         sprite={sprite}
+                                        previewPixels={getPreviewPixels(sprite)}
                                         isActive={activeDragId === null && sprite.id === activeSpriteId}
                                         onMouseDown={handleFrameMouseDown}
                                         onClick={handleFrameClick}
@@ -780,6 +857,7 @@ export const Timeline: React.FC = () => {
                                     <TimelineFrame
                                         key={`ghost-${sprite.id}`}
                                         sprite={sprite}
+                                        previewPixels={getPreviewPixels(sprite)}
                                         isAdd={i === 0} // Only first one has +
                                         index={sprites.length + i} // Virtual index
                                         isActive={false}
@@ -794,6 +872,7 @@ export const Timeline: React.FC = () => {
                             <div style={{ display: 'inline-block' }}>
                                 <TimelineFrame
                                     sprite={activeSprite}
+                                    previewPixels={getPreviewPixels(activeSprite)}
                                     isAdd={true}
                                     index={sprites.length}
                                     isActive={false}
@@ -823,6 +902,7 @@ export const Timeline: React.FC = () => {
                                         <TimelineFrame
                                             key={`overlay-${sprite.id}`}
                                             sprite={sprite}
+                                            previewPixels={getPreviewPixels(sprite)}
                                             index={i}
                                             isActive={false}
                                             isSelected={true}
@@ -843,6 +923,7 @@ export const Timeline: React.FC = () => {
                         return (
                             <TimelineFrame
                                 sprite={sprite}
+                                previewPixels={getPreviewPixels(sprite)}
                                 index={0} // Index doesn't matter for overlay
                                 isActive={true}
                                 onMouseDown={() => { }}
