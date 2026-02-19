@@ -749,7 +749,6 @@ export const EditorProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
                 // So here we only paint pixels that are NOT in selection.
 
-                const newPixelData = [...sprite.pixelData];
                 const newLayerData = [...sprite[layerKey]];
                 let changed = false;
 
