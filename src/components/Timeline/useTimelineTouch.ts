@@ -2,7 +2,8 @@ import React from 'react';
 import type { Sprite } from '../../types';
 
 // Touch interaction constants
-const LONG_PRESS_DELAY = 500;
+export const TIMELINE_SELECTION_LONG_PRESS_DELAY_MS = 500;
+const LONG_PRESS_DELAY = TIMELINE_SELECTION_LONG_PRESS_DELAY_MS;
 const INITIAL_MOVE_THRESHOLD = 5;
 const UP_DIRECTION_THRESHOLD = -3;
 const MOVE_THRESHOLD = 10;
@@ -23,6 +24,8 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
     const [touchDragBlocked, setTouchDragBlocked] = React.useState(false);
     const [isPaintSelecting, setIsPaintSelecting] = React.useState(false);
     const [isFramePointerDown, setIsFramePointerDown] = React.useState(false);
+    // Visual-only affordance for the long-press timer; actual selection still happens in the timeout below.
+    const [selectionPendingSpriteId, setSelectionPendingSpriteId] = React.useState<number | null>(null);
 
     // ── Refs ──
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -43,12 +46,14 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
         }
+        setSelectionPendingSpriteId(null);
         longPressStartPosRef.current = null;
     }, []);
 
     // ── Frame pointer handlers ──
 
-    const handleFramePointerDown = React.useCallback((e: React.PointerEvent, _index: number, sprite: Sprite) => {
+    const handleFramePointerDown = React.useCallback((e: React.PointerEvent, index: number, sprite: Sprite) => {
+        void index;
         isPointerDownRef.current = true;
         setIsFramePointerDown(true);
         const pointerId = e.pointerId;
@@ -56,9 +61,11 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
         longPressStartPosRef.current = { x: e.clientX, y: e.clientY };
         pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
         firstMoveUpRef.current = null;
+        setSelectionPendingSpriteId(sprite.id);
 
         longPressTimerRef.current = setTimeout(() => {
             if (isPointerDownRef.current) {
+                setSelectionPendingSpriteId(null);
                 isPaintSelectingRef.current = true;
                 setIsPaintSelecting(true);
                 setIsSelectionMode(true);
@@ -94,9 +101,11 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
                     }
                 }
             }
+            longPressTimerRef.current = null;
+            setSelectionPendingSpriteId(null);
             longPressStartPosRef.current = null;
         }, LONG_PRESS_DELAY);
-    }, [selectedSpriteIds]);
+    }, [selectedSpriteIds, onFrameFocus]);
 
     const handleFramePointerUp = React.useCallback((e: React.PointerEvent) => {
         // Ignore synthetic events from the dnd-kit cancel logic above
@@ -109,6 +118,7 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
             clearTimeout(longPressTimerRef.current);
             longPressTimerRef.current = null;
         }
+        setSelectionPendingSpriteId(null);
         longPressStartPosRef.current = null;
 
         if (isPaintSelecting) {
@@ -164,7 +174,11 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
             }
         };
 
-        const handlePointerUp = () => {
+        const handlePointerUp = (e: PointerEvent) => {
+            // Synthetic pointerups only cancel dnd-kit; the real pointer is still down for paint-select.
+            if (e.isTrusted === false) return;
+
+            cancelLongPress();
             isPointerDownRef.current = false;
             setIsFramePointerDown(false);
             longPressStartPosRef.current = null;
@@ -177,6 +191,7 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
             cancelLongPress();
             isPointerDownRef.current = false;
             setIsFramePointerDown(false);
+            setSelectionPendingSpriteId(null);
             pointerDownPosRef.current = null;
             firstMoveUpRef.current = null;
             setTouchDragBlocked(false);
@@ -316,6 +331,7 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
         setSelectedSpriteIds,
         isPaintSelecting,
         isFramePointerDown,
+        selectionPendingSpriteId,
         touchDragBlocked,
 
         // Frame event handlers

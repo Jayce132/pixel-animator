@@ -2,7 +2,7 @@ import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TimelineFrame } from './TimelineFrame';
-import type { Sprite } from '../../types';
+import type { Palette, PixelData, Sprite } from '../../types';
 
 interface SortableFrameProps {
     id: number;
@@ -12,14 +12,19 @@ interface SortableFrameProps {
 
     dragAccepted?: boolean;
     isSelected?: boolean;
+    isSelectionPending?: boolean;
+    selectionPendingDurationMs?: number;
     forceDragging?: boolean;
     onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
+    onMouseEnter?: (sprite: Sprite) => void;
+    onMouseLeave?: (sprite: Sprite) => void;
     onClick?: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
     onPointerDown?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     onPointerUp?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     onPointerEnter?: (e: React.PointerEvent, index: number, sprite: Sprite) => void;
     disabled?: boolean;
-    previewPixels?: (string | null)[];
+    palette: Palette;
+    previewPixels?: PixelData;
 }
 
 export const SortableFrame: React.FC<SortableFrameProps> = ({
@@ -30,13 +35,18 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
 
     dragAccepted = false,
     isSelected,
+    isSelectionPending,
+    selectionPendingDurationMs,
     forceDragging,
     onMouseDown,
+    onMouseEnter,
+    onMouseLeave,
     onClick,
     onPointerDown,
     onPointerUp,
     onPointerEnter,
     disabled = false,
+    palette,
     previewPixels
 }) => {
     const {
@@ -67,16 +77,22 @@ export const SortableFrame: React.FC<SortableFrameProps> = ({
             style={style}
             className="timeline-frame-wrapper"
             id={`frame-${index}`}
+            data-timeline-sprite-id={sprite.id}
+            onMouseEnter={() => onMouseEnter?.(sprite)}
+            onMouseLeave={() => onMouseLeave?.(sprite)}
             {...attributes}
             {...listeners}
         >
             <TimelineFrame
                 sprite={sprite}
+                palette={palette}
                 previewPixels={previewPixels}
                 index={index}
                 isActive={isActive}
 
                 isSelected={isSelected}
+                isSelectionPending={isSelectionPending}
+                selectionPendingDurationMs={selectionPendingDurationMs}
                 onMouseDown={onMouseDown}
                 onClick={onClick}
                 onPointerDown={onPointerDown}

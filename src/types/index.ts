@@ -1,4 +1,9 @@
-export type PixelData = (string | null)[];
+export type PixelData = Uint8Array;
+export type Palette = string[];
+export type FloatingLayerPixel = string | null;
+export type FloatingLayerUpdate = FloatingLayerPixel | undefined;
+export type Layer = 'base' | 'top';
+export type NotificationTone = 'error' | 'info';
 
 export interface Sprite {
     id: number;
@@ -9,6 +14,12 @@ export interface Sprite {
     redoHistory: PixelData[];
     overlayHistory: PixelData[];
     overlayRedoHistory: PixelData[];
+}
+
+export interface EditorNotification {
+    id: number;
+    message: string;
+    tone: NotificationTone;
 }
 
 export type Tool = 'brush' | 'eraser' | 'fill' | 'select';

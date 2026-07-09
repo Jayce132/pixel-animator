@@ -1,10 +1,15 @@
 import React from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import { useEditorUiStore } from '../../stores/editorStore';
 
 const MAX_SLOTS = 8;
+type SwatchVars = React.CSSProperties & Record<'--swatch-color', string>;
 
 export const RecentColors: React.FC = () => {
-    const { recentColors, setCurrentColor, currentTool, setTool, currentColor } = useEditor();
+    const recentColors = useEditorUiStore(state => state.recentColors);
+    const setCurrentColor = useEditorUiStore(state => state.setCurrentColor);
+    const currentTool = useEditorUiStore(state => state.currentTool);
+    const setTool = useEditorUiStore(state => state.setTool);
+    const currentColor = useEditorUiStore(state => state.currentColor);
 
     if (recentColors.length === 0) return null;
 
@@ -42,8 +47,8 @@ export const RecentColors: React.FC = () => {
                         return (
                             <div
                                 key={color}
-                                className={`palette-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
-                                style={{ backgroundColor: color }}
+                                className={`palette-color has-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
+                                style={{ '--swatch-color': color } as SwatchVars}
                                 onClick={() => setCurrentColor(color)}
                                 title={color}
                             />
@@ -51,7 +56,7 @@ export const RecentColors: React.FC = () => {
                     }
 
                     // Empty slot
-                    return <div key={`empty-${index}`} className="palette-color empty" style={{ opacity: 0.1, background: '#333' }} />;
+                    return <div key={`empty-${index}`} className="palette-color empty" />;
                 })}
             </div>
         </div>

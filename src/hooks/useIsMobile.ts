@@ -14,7 +14,7 @@ export const useIsMobile = () => {
         const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
         mql.addEventListener('change', handler);
         return () => mql.removeEventListener('change', handler);
-    }, []);
+    }, [query]);
 
     return isMobile;
 };

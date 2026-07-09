@@ -1,6 +1,4 @@
-import { useState } from 'react';
-import { useEditor } from './contexts/editorContextShared';
-import { EditorProvider } from './contexts/EditorContext'
+import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar/Sidebar'
 import { TopBar } from './components/Mobile/TopBar'
 import { Editor } from './components/Editor/Editor'
@@ -9,6 +7,8 @@ import { SelectionControls } from './components/Editor/SelectionControls'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useEditorUiStore } from './stores/editorStore'
+import { selectCanClear, selectCanUndo } from './stores/editorSelectors'
 import './index.css'
 
 const AppContent = () => {
@@ -18,17 +18,24 @@ const AppContent = () => {
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [showTimeline, setShowTimeline] = useState(true);
 
-    const { canUndo, canClear, sprites, isDrawing } = useEditor();
+    const sprites = useEditorUiStore(state => state.sprites);
+    const isDrawing = useEditorUiStore(state => state.isDrawing);
+    const canUndo = useEditorUiStore(selectCanUndo);
+    const canClear = useEditorUiStore(selectCanClear);
+    const notification = useEditorUiStore(state => state.notification);
+    const clearNotification = useEditorUiStore(state => state.clearNotification);
+    const discardPendingPixelUpdates = useEditorUiStore(state => state.discardPendingPixelUpdates);
     const hasDrawn = canUndo || sprites.length > 1 || (canClear && !isDrawing);
 
-    const toggleStyle = (active: boolean) => ({
-        background: 'none',
-        border: 'none',
-        color: active ? '#ccc' : '#666',
-        cursor: 'pointer' as const,
-        fontFamily: 'inherit',
-        fontSize: isMobile ? '0.7rem' : '0.8rem',
-    });
+    useEffect(() => {
+        return () => {
+            discardPendingPixelUpdates();
+        };
+    }, [discardPendingPixelUpdates]);
+
+    const getViewToggleClassName = (active: boolean) => (
+        `view-toggle ${active ? 'active' : ''}`
+    );
 
     return (
         <div className="app-container">
@@ -39,25 +46,30 @@ const AppContent = () => {
             </div>
 
             <main className="editor-container">
+                {notification && (
+                    <div className={`app-notification ${notification.tone}`} role="status">
+                        <span>{notification.message}</span>
+                        <button
+                            type="button"
+                            className="app-notification-close"
+                            onClick={clearNotification}
+                            aria-label="Dismiss notification"
+                        >
+                            x
+                        </button>
+                    </div>
+                )}
+
                 {/* View Controls — desktop only */}
                 {hasDrawn && !isMobile && (
-                    <div style={{
-                        position: 'absolute',
-                        top: '12px',
-                        right: '20px',
-                        zIndex: 100,
-                        display: 'flex',
-                        gap: '16px',
-                        fontSize: '0.8rem',
-                        color: '#888'
-                    }}>
-                        <button onClick={() => setShowSidebar(!showSidebar)} style={toggleStyle(showSidebar)}>
+                    <div className="view-controls">
+                        <button onClick={() => setShowSidebar(!showSidebar)} className={getViewToggleClassName(showSidebar)}>
                             Toolbar
                         </button>
-                        <button onClick={() => setShowShortcuts(!showShortcuts)} style={toggleStyle(showShortcuts)}>
+                        <button onClick={() => setShowShortcuts(!showShortcuts)} className={getViewToggleClassName(showShortcuts)}>
                             Shortcuts
                         </button>
-                        <button onClick={() => setShowTimeline(!showTimeline)} style={toggleStyle(showTimeline)}>
+                        <button onClick={() => setShowTimeline(!showTimeline)} className={getViewToggleClassName(showTimeline)}>
                             Timeline
                         </button>
                     </div>
@@ -67,10 +79,10 @@ const AppContent = () => {
                 {isMobile && showSidebar && <TopBar />}
                 {hasDrawn && isMobile && (
                     <div className="mobile-toggles">
-                        <button onClick={() => setShowSidebar(!showSidebar)} style={toggleStyle(showSidebar)}>
+                        <button onClick={() => setShowSidebar(!showSidebar)} className={getViewToggleClassName(showSidebar)}>
                             Toolbar
                         </button>
-                        <button onClick={() => setShowTimeline(!showTimeline)} style={toggleStyle(showTimeline)}>
+                        <button onClick={() => setShowTimeline(!showTimeline)} className={getViewToggleClassName(showTimeline)}>
                             Timeline
                         </button>
                     </div>
@@ -92,11 +104,7 @@ const AppContent = () => {
 };
 
 export const App = () => {
-    return (
-        <EditorProvider>
-            <AppContent />
-        </EditorProvider>
-    );
+    return <AppContent />;
 };
 
 export default App;

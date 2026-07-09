@@ -1,9 +1,13 @@
 import React from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import { useEditorUiStore } from '../../stores/editorStore';
 import { PRESET_COLORS } from '../../types';
 
+type SwatchVars = React.CSSProperties & Record<'--swatch-color', string>;
+
 export const PaletteGrid: React.FC = () => {
-    const { currentColor, setCurrentColor, currentTool } = useEditor();
+    const currentColor = useEditorUiStore(state => state.currentColor);
+    const setCurrentColor = useEditorUiStore(state => state.setCurrentColor);
+    const currentTool = useEditorUiStore(state => state.currentTool);
 
     return (
         <div className="palette-section">
@@ -12,8 +16,8 @@ export const PaletteGrid: React.FC = () => {
                 {PRESET_COLORS.map((color) => (
                     <div
                         key={color}
-                        className={`palette-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
-                        style={{ backgroundColor: color }}
+                        className={`palette-color has-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
+                        style={{ '--swatch-color': color } as SwatchVars}
                         onClick={() => setCurrentColor(color)}
                         title={color}
                     />

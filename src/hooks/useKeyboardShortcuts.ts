@@ -1,42 +1,75 @@
 import { useEffect, useRef } from 'react';
 import Mousetrap from 'mousetrap';
-import { useEditor } from '../contexts/editorContextShared';
+import { useEditorUiStore } from '../stores/editorStore';
+
+const NUDGE_ACTIONS = ['left', 'right', 'up', 'down'] as const;
+type NudgeAction = typeof NUDGE_ACTIONS[number];
+type NudgeRepeatState = {
+    startedAt: number;
+    nextAt: number;
+};
+
+const NUDGE_VECTOR: Record<NudgeAction, { dx: number; dy: number }> = {
+    left: { dx: -1, dy: 0 },
+    right: { dx: 1, dy: 0 },
+    up: { dx: 0, dy: -1 },
+    down: { dx: 0, dy: 1 }
+};
+
+const isNudgeAction = (action: string): action is NudgeAction => (
+    (NUDGE_ACTIONS as readonly string[]).includes(action)
+);
+
+const getNudgeRepeatDelay = (heldForMs: number) => {
+    if (heldForMs < 260) return 220;
+    if (heldForMs < 520) return 130;
+    if (heldForMs < 850) return 85;
+    if (heldForMs < 1200) return 60;
+    if (heldForMs < 1800) return 40;
+    return 20;
+};
 
 export const useKeyboardShortcuts = () => {
-    const {
-        setTool,
-        undo,
-        redo,
-        duplicateSprite,
-        setBrushSize,
-        brushSize,
-        currentTool,
-        isPlaying,
-        setIsPlaying,
-        stamp,
-        activeSpriteId,
-        setActiveSpriteId,
-        sprites,
-        selectedPixels,
-        floatingLayer,
-        clearSelection,
-        nudgeSelection,
-        flipSelectionHorizontal,
-        flipSelectionVertical,
-        rotateSelectionLeft,
-        rotateSelectionRight,
-        addSprite,
-        clearCanvas,
-        commitHistory
-    } = useEditor();
+    const setTool = useEditorUiStore(state => state.setTool);
+    const undo = useEditorUiStore(state => state.undo);
+    const redo = useEditorUiStore(state => state.redo);
+    const setBrushSize = useEditorUiStore(state => state.setBrushSize);
+    const isPlaying = useEditorUiStore(state => state.isPlaying);
+    const setIsPlaying = useEditorUiStore(state => state.setIsPlaying);
+    const stamp = useEditorUiStore(state => state.stamp);
+    const activeSpriteId = useEditorUiStore(state => state.activeSpriteId);
+    const setActiveSpriteId = useEditorUiStore(state => state.setActiveSpriteId);
+    const sprites = useEditorUiStore(state => state.sprites);
+    const selectedPixelsSize = useEditorUiStore(state => state.selectedPixels.size);
+    const floatingLayerSize = useEditorUiStore(state => state.floatingLayer.size);
+    const clearSelection = useEditorUiStore(state => state.clearSelection);
+    const nudgeSelection = useEditorUiStore(state => state.nudgeSelection);
+    const flipSelectionHorizontal = useEditorUiStore(state => state.flipSelectionHorizontal);
+    const flipSelectionVertical = useEditorUiStore(state => state.flipSelectionVertical);
+    const rotateSelectionLeft = useEditorUiStore(state => state.rotateSelectionLeft);
+    const rotateSelectionRight = useEditorUiStore(state => state.rotateSelectionRight);
+    const clearCanvas = useEditorUiStore(state => state.clearCanvas);
+    const commitHistory = useEditorUiStore(state => state.commitHistory);
+    const setActiveActions = useEditorUiStore(state => state.setActiveActions);
+    const activeLayer = useEditorUiStore(state => state.activeLayer);
+    const floatingLayerSignature = useEditorUiStore(state => (
+        Array.from(state.floatingLayer.entries())
+            .sort(([a], [b]) => a - b)
+            .map(([index, color]) => `${index}:${color}`)
+            .join('|')
+    ));
     const activeActionsRef = useRef(new Set<string>());
-    const lastTickRef = useRef<number>(0);
+    const stationaryStampKeyRef = useRef<string | null>(null);
+    const nudgeRepeatStateRef = useRef(new Map<NudgeAction, NudgeRepeatState>());
     const animationFrameRef = useRef<number | null>(null);
 
     // Refs for current state to avoid stale closures in the loop
     const stateRefs = useRef({
-        selectedPixelsSize: selectedPixels.size,
-        floatingLayerSize: floatingLayer.size,
+        selectedPixelsSize,
+        floatingLayerSize,
+        activeLayer,
+        activeSpriteId,
+        floatingLayerSignature,
         nudgeSelection,
         stamp,
         commitHistory
@@ -44,43 +77,90 @@ export const useKeyboardShortcuts = () => {
 
     useEffect(() => {
         stateRefs.current = {
-            selectedPixelsSize: selectedPixels.size,
-            floatingLayerSize: floatingLayer.size,
+            selectedPixelsSize,
+            floatingLayerSize,
+            activeLayer,
+            activeSpriteId,
+            floatingLayerSignature,
             nudgeSelection,
             stamp,
             commitHistory
         };
-    }, [selectedPixels.size, floatingLayer.size, nudgeSelection, stamp, commitHistory]);
+    }, [
+        selectedPixelsSize,
+        floatingLayerSize,
+        activeLayer,
+        activeSpriteId,
+        floatingLayerSignature,
+        nudgeSelection,
+        stamp,
+        commitHistory
+    ]);
 
     useEffect(() => {
-        const TICK_RATE_MS = 80;
+        const getDueNudgeStep = (actions: Set<string>, timestamp: number) => {
+            let dx = 0;
+            let dy = 0;
+            let hasDueNudge = false;
+
+            for (const action of NUDGE_ACTIONS) {
+                if (!actions.has(action)) {
+                    nudgeRepeatStateRef.current.delete(action);
+                    continue;
+                }
+
+                let repeatState = nudgeRepeatStateRef.current.get(action);
+                if (!repeatState) {
+                    repeatState = { startedAt: timestamp, nextAt: 0 };
+                    nudgeRepeatStateRef.current.set(action, repeatState);
+                }
+
+                if (timestamp < repeatState.nextAt) continue;
+
+                const vector = NUDGE_VECTOR[action];
+                dx += vector.dx;
+                dy += vector.dy;
+                hasDueNudge = true;
+                repeatState.nextAt = timestamp + getNudgeRepeatDelay(timestamp - repeatState.startedAt);
+            }
+
+            return {
+                dx,
+                dy,
+                hasNudgeInput: NUDGE_ACTIONS.some(action => actions.has(action)),
+                hasNudgeStep: hasDueNudge && (dx !== 0 || dy !== 0)
+            };
+        };
 
         const gameLoop = (timestamp: number) => {
-            if (timestamp - lastTickRef.current >= TICK_RATE_MS) {
-                lastTickRef.current = timestamp;
+            const {
+                selectedPixelsSize,
+                floatingLayerSize,
+                activeLayer,
+                activeSpriteId,
+                floatingLayerSignature,
+                nudgeSelection,
+                stamp
+            } = stateRefs.current;
+            const actions = activeActionsRef.current;
+            const stationaryStampKey = `${activeSpriteId}:${activeLayer}:${floatingLayerSignature}`;
 
-                const { selectedPixelsSize, floatingLayerSize, nudgeSelection, stamp } = stateRefs.current;
-                const actions = activeActionsRef.current;
+            if (selectedPixelsSize > 0) {
+                const { dx, dy, hasNudgeInput, hasNudgeStep } = getDueNudgeStep(actions, timestamp);
 
-                if (selectedPixelsSize > 0) {
-                    let dx = 0;
-                    let dy = 0;
-                    let nudged = false;
-
-                    if (actions.has('left')) { dx -= 1; nudged = true; }
-                    if (actions.has('right')) { dx += 1; nudged = true; }
-                    if (actions.has('up')) { dy -= 1; nudged = true; }
-                    if (actions.has('down')) { dy += 1; nudged = true; }
-
-                    if (nudged) {
-                        nudgeSelection(dx, dy);
-                        // Auto-stamp if holding enter/stamp AND floating layer exists
-                        if (actions.has('stamp') && floatingLayerSize > 0) {
-                            stamp(false);
-                        }
-                    } else if (actions.has('stamp') && floatingLayerSize > 0) {
-                        // Just stamping, no movement
+                if (hasNudgeStep) {
+                    nudgeSelection(dx, dy);
+                    // Auto-stamp if holding enter/stamp AND floating layer exists
+                    if (actions.has('stamp') && floatingLayerSize > 0) {
+                        stamp(false, false);
+                        stationaryStampKeyRef.current = stationaryStampKey;
+                    }
+                } else if (!hasNudgeInput && actions.has('stamp') && floatingLayerSize > 0) {
+                    // Just stamping, no movement. Apply once per frame/stamp state
+                    // so the stamp animation does not replay every tick.
+                    if (stationaryStampKeyRef.current !== stationaryStampKey) {
                         stamp(false);
+                        stationaryStampKeyRef.current = stationaryStampKey;
                     }
                 }
             }
@@ -97,9 +177,7 @@ export const useKeyboardShortcuts = () => {
     useEffect(() => {
         // Helper to safely bind/unbind continuous actions
         const notifyActionsChanged = () => {
-            window.dispatchEvent(new CustomEvent('active-actions-changed', {
-                detail: Array.from(activeActionsRef.current)
-            }));
+            setActiveActions(Array.from(activeActionsRef.current));
         };
 
         const bindAction = (key: string | string[], action: string) => {
@@ -108,16 +186,18 @@ export const useKeyboardShortcuts = () => {
                 if (!activeActionsRef.current.has(action)) {
                     activeActionsRef.current.add(action);
                     notifyActionsChanged();
-                    // Force an immediate tick on first press for responsiveness
-                    if (activeActionsRef.current.size === 1) lastTickRef.current = 0;
                 }
             }, 'keydown');
             Mousetrap.bind(key, (e) => {
                 e.preventDefault();
                 if (activeActionsRef.current.has(action)) {
                     activeActionsRef.current.delete(action);
+                    if (isNudgeAction(action)) {
+                        nudgeRepeatStateRef.current.delete(action);
+                    }
                     notifyActionsChanged();
                     if (action === 'stamp') {
+                        stationaryStampKeyRef.current = null;
                         stateRefs.current.commitHistory();
                     }
                 }
@@ -165,31 +245,31 @@ export const useKeyboardShortcuts = () => {
 
         // Selection Actions
         Mousetrap.bind('esc', () => {
-            if (selectedPixels.size > 0) clearSelection();
+            if (selectedPixelsSize > 0) clearSelection();
         });
         bindSingleUIAction('r', 'rotR', (e) => {
-            if (selectedPixels.size > 0) {
+            if (selectedPixelsSize > 0) {
                 e.preventDefault();
                 rotateSelectionRight();
                 if (activeActionsRef.current.has('stamp')) stateRefs.current.stamp(false);
             }
         });
         bindSingleUIAction('shift+r', 'rotL', (e) => {
-            if (selectedPixels.size > 0) {
+            if (selectedPixelsSize > 0) {
                 e.preventDefault();
                 rotateSelectionLeft();
                 if (activeActionsRef.current.has('stamp')) stateRefs.current.stamp(false);
             }
         });
         bindSingleUIAction('shift+h', 'flipH', (e) => {
-            if (selectedPixels.size > 0) {
+            if (selectedPixelsSize > 0) {
                 e.preventDefault();
                 flipSelectionHorizontal();
                 if (activeActionsRef.current.has('stamp')) stateRefs.current.stamp(false);
             }
         });
         bindSingleUIAction('shift+v', 'flipV', (e) => {
-            if (selectedPixels.size > 0) {
+            if (selectedPixelsSize > 0) {
                 e.preventDefault();
                 flipSelectionVertical();
                 if (activeActionsRef.current.has('stamp')) stateRefs.current.stamp(false);
@@ -220,9 +300,10 @@ export const useKeyboardShortcuts = () => {
 
         // Deselect
         Mousetrap.bind('mod+d', (e) => {
-            if (selectedPixels.size > 0) {
+            if (selectedPixelsSize > 0) {
                 e.preventDefault();
                 clearSelection();
+                setTool('brush');
             }
         });
 
@@ -232,6 +313,8 @@ export const useKeyboardShortcuts = () => {
         const handleWindowBlur = () => {
             if (activeActionsRef.current.size > 0) {
                 activeActionsRef.current.clear();
+                stationaryStampKeyRef.current = null;
+                nudgeRepeatStateRef.current.clear();
                 notifyActionsChanged();
             }
         };
@@ -244,14 +327,16 @@ export const useKeyboardShortcuts = () => {
                 if (!activeActionsRef.current.has(action)) {
                     activeActionsRef.current.add(action);
                     notifyActionsChanged();
-                    // Force tick on first press for instant feel
-                    if (activeActionsRef.current.size === 1) lastTickRef.current = 0;
                 }
             } else {
                 if (activeActionsRef.current.has(action)) {
                     activeActionsRef.current.delete(action);
+                    if (isNudgeAction(action)) {
+                        nudgeRepeatStateRef.current.delete(action);
+                    }
                     notifyActionsChanged();
                     if (action === 'stamp') {
+                        stationaryStampKeyRef.current = null;
                         stateRefs.current.commitHistory();
                     }
                 }
@@ -270,25 +355,21 @@ export const useKeyboardShortcuts = () => {
         setTool,
         undo,
         redo,
-        duplicateSprite,
         setBrushSize,
-        brushSize,
-        currentTool,
         isPlaying,
         setIsPlaying,
         stamp,
         activeSpriteId,
         setActiveSpriteId,
         sprites,
-        selectedPixels,
-        floatingLayer,
+        selectedPixelsSize,
         clearSelection,
         nudgeSelection,
         flipSelectionHorizontal,
         flipSelectionVertical,
         rotateSelectionLeft,
         rotateSelectionRight,
-        addSprite,
-        clearCanvas
+        clearCanvas,
+        setActiveActions
     ]);
 };

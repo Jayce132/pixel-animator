@@ -1,10 +1,13 @@
 import React from 'react';
 import { GRID_SIZE } from '../../types';
-import type { Sprite } from '../../types';
+import type { Palette, PixelData, Sprite } from '../../types';
+import { getCompositePixelData } from '../../utils/compositing';
+import { getPixelColor } from '../../utils/pixelData';
 
 interface TimelineFrameProps {
     sprite: Sprite;
-    previewPixels?: (string | null)[];
+    palette: Palette;
+    previewPixels?: PixelData;
     isActive: boolean;
     onMouseDown: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
     onClick?: (e: React.MouseEvent, index: number, sprite: Sprite) => void;
@@ -15,11 +18,14 @@ interface TimelineFrameProps {
     isAdd?: boolean;
 
     isSelected?: boolean;
+    isSelectionPending?: boolean;
+    selectionPendingDurationMs?: number;
     isGhost?: boolean;
 }
 
 export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     sprite,
+    palette,
     previewPixels,
     isActive,
     onMouseDown,
@@ -31,6 +37,8 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     isAdd,
 
     isSelected = false,
+    isSelectionPending = false,
+    selectionPendingDurationMs = 500,
     isGhost = false,
 }) => {
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
@@ -45,23 +53,21 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
         // Clear previous content
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const pixels = previewPixels ?? sprite.pixelData.map((baseColor, i) => sprite.overlayPixelData[i] ?? baseColor);
-        pixels.forEach((color, i) => {
+        const pixels = previewPixels ?? getCompositePixelData(sprite);
+        for (let i = 0; i < pixels.length; i++) {
+            const color = getPixelColor(pixels, i, palette);
             if (color) {
                 const x = (i % GRID_SIZE);
                 const y = Math.floor(i / GRID_SIZE);
                 ctx.fillStyle = color;
                 ctx.fillRect(x, y, 1, 1);
             }
-        });
+        }
 
-    }, [previewPixels, sprite.pixelData, sprite.overlayPixelData]);
+    }, [palette, previewPixels, sprite]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
-        // We shouldn't stop propagation here as it might interfere with dnd-kit which listens on parent
-        // But if dnd-kit uses PointerEvents, it might be fine.
-        // However, removing stopPropagation is generally safer for dnd-kit context.
-        // e.stopPropagation(); 
+        // Let dnd-kit receive the pointer sequence from the sortable parent.
         onMouseDown(e, index, sprite);
     };
 
@@ -89,6 +95,7 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
                 ${isAdd ? 'add-new' : ''} 
 
                 ${isSelected ? 'selected' : ''}
+                ${isSelectionPending ? 'select-pending' : ''}
                 ${isGhost ? 'ghost' : ''}
             `}
             onMouseDown={handleMouseDown}
@@ -98,37 +105,19 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
             onPointerEnter={handlePointerEnter}
             data-selectable-id={sprite.id}
             style={{
-                position: 'relative', // For overlay positioning
-            }}
+                '--frame-select-duration': `${selectionPendingDurationMs}ms`
+            } as React.CSSProperties & Record<'--frame-select-duration', string>}
         >
             <canvas
                 ref={canvasRef}
                 width={GRID_SIZE}
                 height={GRID_SIZE}
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    imageRendering: 'pixelated',
-                    pointerEvents: 'none', // Let clicks pass through to div
-                    opacity: isAdd ? 0.5 : 1 // Dim the preview if it's the "Add" button
-                }}
+                className="timeline-frame-canvas"
             />
 
             {isAdd ? (
-                <div style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    pointerEvents: 'none'
-                }}>
-                    <span className="add-icon" style={{
-                        fontSize: '2rem',
-                        fontWeight: 'bold',
-                        color: 'white',
-                        textShadow: '0 0 4px rgba(0,0,0,0.8)'
-                    }}>+</span>
+                <div className="timeline-add-overlay">
+                    <span className="add-icon">+</span>
                 </div>
             ) : (
                 <div className="frame-number">{index + 1}</div>

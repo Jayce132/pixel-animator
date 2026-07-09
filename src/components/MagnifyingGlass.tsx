@@ -1,13 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import { GRID_SIZE } from '../types';
+import type { FloatingLayerPixel, Palette, PixelData } from '../types';
+import { getVisibleLayerColorAtIndex } from '../utils/compositing';
 
 interface MagnifyingGlassProps {
     screenX: number;
     screenY: number;
     gridX: number;
     gridY: number;
-    pixelData: (string | null)[];
-    floatingLayer: Map<number, string>;
+    pixelData: PixelData;
+    floatingLayer: Map<number, FloatingLayerPixel>;
+    palette: Palette;
     gridSize?: number;
     targetColor: string | null;
 }
@@ -19,6 +22,7 @@ export const MagnifyingGlass: React.FC<MagnifyingGlassProps> = ({
     gridY,
     pixelData,
     floatingLayer,
+    palette,
     gridSize = GRID_SIZE,
     targetColor
 }) => {
@@ -65,7 +69,7 @@ export const MagnifyingGlass: React.FC<MagnifyingGlassProps> = ({
 
                     // Color
                     const idx = pxY * gridSize + pxX;
-                    const color = floatingLayer.has(idx) ? floatingLayer.get(idx) : pixelData[idx];
+                    const color = getVisibleLayerColorAtIndex(pixelData, floatingLayer, palette, idx);
 
                     if (color) {
                         ctx.fillStyle = color;
@@ -112,29 +116,22 @@ export const MagnifyingGlass: React.FC<MagnifyingGlassProps> = ({
         ctx.lineWidth = 1;
         ctx.stroke();
 
-    }, [gridX, gridY, pixelData, floatingLayer, gridSize, targetColor]);
+    }, [gridX, gridY, pixelData, floatingLayer, palette, gridSize, targetColor]);
 
     return (
         <div
+            className="magnifying-glass"
             style={{
-                position: 'fixed',
-                left: screenX - (GLASS_SIZE / 2),
-                top: screenY + OFFSET_Y - (GLASS_SIZE / 2),
-                width: GLASS_SIZE,
-                height: GLASS_SIZE,
-                borderRadius: '50%',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                zIndex: 9999,
-                pointerEvents: 'none',
-                overflow: 'hidden',
-                background: '#000'
-            }}
+                '--magnifier-left': `${screenX - (GLASS_SIZE / 2)}px`,
+                '--magnifier-top': `${screenY + OFFSET_Y - (GLASS_SIZE / 2)}px`,
+                '--magnifier-size': `${GLASS_SIZE}px`
+            } as React.CSSProperties & Record<'--magnifier-left' | '--magnifier-top' | '--magnifier-size', string>}
         >
             <canvas
                 ref={canvasRef}
                 width={GLASS_SIZE}
                 height={GLASS_SIZE}
-                style={{ width: '100%', height: '100%' }} // No scaling logic needed here, native res
+                className="magnifying-glass-canvas"
             />
         </div>
     );

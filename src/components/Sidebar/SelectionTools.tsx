@@ -1,13 +1,11 @@
 import React from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import { useEditorUiStore } from '../../stores/editorStore';
 
 export const SelectionTools: React.FC = () => {
-    const {
-        flipSelectionHorizontal,
-        flipSelectionVertical,
-        rotateSelectionLeft,
-        rotateSelectionRight
-    } = useEditor();
+    const flipSelectionHorizontal = useEditorUiStore(state => state.flipSelectionHorizontal);
+    const flipSelectionVertical = useEditorUiStore(state => state.flipSelectionVertical);
+    const rotateSelectionLeft = useEditorUiStore(state => state.rotateSelectionLeft);
+    const rotateSelectionRight = useEditorUiStore(state => state.rotateSelectionRight);
 
     return (
         <div className="palette-section">

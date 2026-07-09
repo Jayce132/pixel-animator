@@ -1,11 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import React from 'react';
 import { TimelineFrame } from './TimelineFrame';
 import { SortableFrame } from './SortableFrame';
-import { useTimelineTouch } from './useTimelineTouch';
+import { ImportExportMenu } from './ImportExportMenu';
+import { SelectedFrameGhostStrip } from './SelectedFrameGhostStrip';
+import { TimelineFpsControls } from './TimelineFpsControls';
+import { TimelineDragOverlayContent } from './TimelineDragOverlayContent';
+import { useTimelineActiveFrameScroll } from './useTimelineActiveFrameScroll';
+import { useTimelineDragHint } from './useTimelineDragHint';
+import { useTimelineKeyboardShortcuts } from './useTimelineKeyboardShortcuts';
+import { TIMELINE_SELECTION_LONG_PRESS_DELAY_MS, useTimelineTouch } from './useTimelineTouch';
+import { getSelectedSpritesInTimelineOrder } from './timelineSelection';
 import { TOTAL_PIXELS } from '../../types';
-import type { Sprite } from '../../types';
-import type { LayerExportMode } from '../../utils/export';
+import type { PixelData, Sprite } from '../../types';
+import { getCompositePixelData, getSpriteLayerPixels } from '../../utils/compositing';
+import { useEditorUiStore } from '../../stores/editorStore';
+import { selectActiveSprite } from '../../stores/editorSelectors';
+import { pixelDataToColorArray } from '../../utils/pixelData';
 import {
     DndContext,
     closestCenter,
@@ -19,323 +29,32 @@ import {
     SortableContext,
     horizontalListSortingStrategy,
 } from '@dnd-kit/sortable';
+import { ArrowUp } from 'lucide-react';
 
-// Import/Export Dropdown Menu Component
-interface ImportExportMenuProps {
-    selectedSpriteIds: Set<number>;
-    setSelectedSpriteIds: React.Dispatch<React.SetStateAction<Set<number>>>;
-    setIsSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
-    hideImport?: boolean;
-}
-
-const ImportExportMenu: React.FC<ImportExportMenuProps> = ({
-    selectedSpriteIds,
-    setSelectedSpriteIds,
-    setIsSelectionMode,
-    hideImport = false
-}) => {
-    const [openMenu, setOpenMenu] = useState<'import' | 'export' | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const projectInputRef = useRef<HTMLInputElement>(null);
-
-    const {
-        saveProject,
-        loadProject,
-        exportFrame,
-        exportFrameJSON,
-        exportSpriteSheet,
-        exportSelectedJSON,
-        exportSelectedPNG,
-        exportGIF,
-        layerExportMode,
-        setLayerExportMode,
-        importMultipleFromJSON, // Added for the new import functionality
-        projectName, setProjectName, // Added project name
-        activeSprite, // Added for exportFrame
-        sprites // Added for exportSpriteSheet
-    } = useEditor();
-
-    // Close menu when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setOpenMenu(null);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => window.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    const toggleMenu = (menu: 'import' | 'export') => {
-        setOpenMenu(prev => prev === menu ? null : menu);
-    };
-
-    const handleImportJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const fileList = e.target.files;
-        if (!fileList || fileList.length === 0) return;
-        const filesArray = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name));
-        try {
-            const results = await Promise.all(
-                filesArray.map(file => {
-                    return new Promise<{ name: string; pixels: (string | null)[]; overlayPixels?: (string | null)[] }[]>((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                            try {
-                                const json = JSON.parse(event.target?.result as string);
-                                if (Array.isArray(json)) {
-                                    // Handle new format where export is an array of frames
-                                    resolve(json);
-                                } else if (json.pixels) {
-                                    // Handle legacy / single-frame format
-                                    resolve([{ name: file.name, pixels: json.pixels, overlayPixels: json.overlayPixels }]);
-                                } else {
-                                    reject(new Error(`Invalid JSON: ${file.name}`));
-                                }
-                            } catch (err) {
-                                reject(err);
-                            }
-                        };
-                        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-                        reader.readAsText(file);
-                    });
-                })
-            );
-            const importedIds = importMultipleFromJSON(results.flat());
-            // Automatically select all newly imported frames so the user can easily manipulate or move them together
-            if (importedIds && importedIds.length > 0) {
-                setSelectedSpriteIds(new Set(importedIds));
-                setIsSelectionMode(true);
-            }
-        } catch (err) {
-            console.error('Failed to parse JSON import:', err);
-            alert('One or more invalid JSON files');
-        }
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-        setOpenMenu(null);
-    };
-
-    return (
-        <div ref={containerRef} style={{ display: 'flex', gap: '8px', position: 'relative', zIndex: 100 }}>
-            {/* Import Button & File Input */}
-            {!hideImport && (
-                <div style={{ position: 'relative' }}>
-                    <button className="secondary-btn-small" onClick={() => toggleMenu('import')}>
-                        Import ▾
-                    </button>
-                    <input
-                        type="file"
-                        accept=".json"
-                        style={{ display: 'none' }}
-                        ref={fileInputRef}
-                        onChange={handleImportJSON}
-                        multiple
-                    />
-                    <input
-                        type="file"
-                        accept=".json"
-                        style={{ display: 'none' }}
-                        ref={projectInputRef}
-                        onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) loadProject(file);
-                            if (projectInputRef.current) projectInputRef.current.value = '';
-                            setOpenMenu(null);
-                        }}
-                    />
-                    {openMenu === 'import' && (
-                        <div style={{
-                            position: 'absolute', bottom: '100%', right: 0, left: 'auto', marginBottom: '4px',
-                            background: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-                            padding: '8px', zIndex: 100, minWidth: '150px',
-                            display: 'flex', flexDirection: 'column', gap: '6px',
-                            boxShadow: '0 -4px 6px rgba(0,0,0,0.3)'
-                        }}>
-                            <button
-                                style={{ textAlign: 'left', padding: '6px 8px', background: '#333', border: '1px solid #444', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                onMouseOver={(e) => e.currentTarget.style.background = '#444'}
-                                onMouseOut={(e) => e.currentTarget.style.background = '#333'}
-                                onClick={() => projectInputRef.current?.click()}
-                            >
-                                Load Project (.json)
-                            </button>
-
-                            <div style={{ height: '1px', background: '#444', margin: '4px 0' }} />
-
-                            <button
-                                style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                onClick={() => fileInputRef.current?.click()}
-                            >
-                                Import Frames (.json)
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Export Menu */}
-            <div style={{ position: 'relative' }}>
-                <button className="secondary-btn-small" onClick={() => toggleMenu('export')}>
-                    {selectedSpriteIds.size > 0 ? 'Export Selected ▾' : 'Export ▾'}
-                </button>
-                {openMenu === 'export' && (
-                    <div style={{
-                        position: 'absolute', bottom: '100%', right: 0, left: 'auto', marginBottom: '4px',
-                        background: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-                        padding: '8px', zIndex: 100, minWidth: '200px',
-                        display: 'flex', flexDirection: 'column', gap: '6px',
-                        boxShadow: '0 -4px 6px rgba(0,0,0,0.3)'
-                    }}>
-                        {selectedSpriteIds.size === 0 && (
-                            <>
-                                <input
-                                    type="text"
-                                    className="project-name-input"
-                                    value={projectName}
-                                    onChange={(e) => setProjectName(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                            e.currentTarget.blur();
-                                        }
-                                    }}
-                                    placeholder="Project Name"
-                                    style={{ width: '100%', padding: '4px 8px', background: '#222', color: '#ccc', border: '1px solid #444', borderRadius: '3px', fontFamily: 'inherit', fontSize: '0.8rem' }}
-                                />
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: '#333', border: '1px solid #444', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#444'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = '#333'}
-                                    onClick={() => { saveProject(projectName); setOpenMenu(null); }}
-                                >
-                                    Save Project (.json)
-                                </button>
-
-                                <div style={{ height: '1px', background: '#444', margin: '4px 0' }} />
-                            </>
-                        )}
-
-                        <div style={{ fontSize: '0.75rem', color: '#888', padding: '0 4px' }}>Target Layer:</div>
-                        <select
-                            value={layerExportMode}
-                            onChange={(e) => setLayerExportMode(e.target.value as LayerExportMode)}
-                            style={{ width: '100%', padding: '4px', background: '#222', color: '#ccc', border: '1px solid #444', borderRadius: '3px', marginBottom: '4px' }}
-                        >
-                            <option value="merged">Merged Image</option>
-                            <option value="base">Base Layer</option>
-                            <option value="top">Top Layer</option>
-                        </select>
-                        {selectedSpriteIds.size === 0 ? (
-                            <>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => {
-                                        if (activeSprite) {
-                                            exportFrame(projectName, layerExportMode);
-                                        }
-                                        setOpenMenu(null);
-                                    }}
-                                >
-                                    Export Frame (.png)
-                                </button>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => {
-                                        if (activeSprite) {
-                                            exportFrameJSON(projectName, layerExportMode);
-                                        }
-                                        setOpenMenu(null);
-                                    }}
-                                >
-                                    Export Frame (.json)
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => {
-                                        const spritesToExport = sprites.filter(s => selectedSpriteIds.has(s.id));
-                                        exportSelectedPNG(projectName, layerExportMode, spritesToExport);
-                                        setOpenMenu(null);
-                                    }}
-                                >
-                                    Export Selected (.png)
-                                </button>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => {
-                                        const spritesToExport = sprites.filter(s => selectedSpriteIds.has(s.id));
-                                        exportSelectedJSON(projectName, layerExportMode, spritesToExport);
-                                        setOpenMenu(null);
-                                    }}
-                                >
-                                    Export Selected (.json)
-                                </button>
-                            </>
-                        )}
-                        {selectedSpriteIds.size === 0 && (
-                            <>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => { exportSpriteSheet(projectName, layerExportMode); setOpenMenu(null); }}
-                                >
-                                    Export Sheet (.png)
-                                </button>
-                                <button
-                                    style={{ textAlign: 'left', padding: '6px 8px', background: 'transparent', border: 'none', color: '#ccc', cursor: 'pointer', borderRadius: '3px' }}
-                                    onMouseOver={(e) => e.currentTarget.style.background = '#333'}
-                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => { exportGIF(projectName, layerExportMode); setOpenMenu(null); }}
-                                >
-                                    Export Animation (.gif)
-                                </button>
-                            </>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
+type TimelineDragHintVars = React.CSSProperties & Record<
+    '--timeline-drag-hint-left' | '--timeline-drag-hint-top',
+    string
+>;
 
 export const Timeline: React.FC = () => {
-    const {
-        sprites,
-        activeSpriteId,
-        activeSprite,
-        setActiveSpriteId,
-        duplicateSprite,
-        deleteSprite,
-        moveSprite,
-        moveSprites,
-        isPlaying,
-        setIsPlaying,
-        isOnionSkinning,
-        setIsOnionSkinning,
-        importMultipleFromJSON,
-        fps,
-        setFps,
-        activeLayer,
-        isOverlayStacked
-    } = useEditor();
-
-    const getCompositePixelData = React.useCallback((sprite: { pixelData: (string | null)[]; overlayPixelData: (string | null)[] }) => {
-        return sprite.pixelData.map((base, i) => sprite.overlayPixelData[i] ?? base);
-    }, []);
+    const sprites = useEditorUiStore(state => state.sprites);
+    const activeSpriteId = useEditorUiStore(state => state.activeSpriteId);
+    const activeSprite = useEditorUiStore(selectActiveSprite);
+    const setActiveSpriteId = useEditorUiStore(state => state.setActiveSpriteId);
+    const duplicateSprite = useEditorUiStore(state => state.duplicateSprite);
+    const deleteSprite = useEditorUiStore(state => state.deleteSprite);
+    const moveSprite = useEditorUiStore(state => state.moveSprite);
+    const moveSprites = useEditorUiStore(state => state.moveSprites);
+    const setIsPlaying = useEditorUiStore(state => state.setIsPlaying);
+    const importMultipleFromJSON = useEditorUiStore(state => state.importMultipleFromJSON);
+    const isPlaying = useEditorUiStore(state => state.isPlaying);
+    const isOnionSkinning = useEditorUiStore(state => state.isOnionSkinning);
+    const setIsOnionSkinning = useEditorUiStore(state => state.setIsOnionSkinning);
+    const fps = useEditorUiStore(state => state.fps);
+    const setFps = useEditorUiStore(state => state.setFps);
+    const activeLayer = useEditorUiStore(state => state.activeLayer);
+    const isOverlayStacked = useEditorUiStore(state => state.isOverlayStacked);
+    const palette = useEditorUiStore(state => state.palette);
 
     const spritesRef = React.useRef(sprites);
     const activeSpriteIdRef = React.useRef(activeSpriteId);
@@ -353,6 +72,7 @@ export const Timeline: React.FC = () => {
         selectedSpriteIds, setSelectedSpriteIds,
         isPaintSelecting,
         isFramePointerDown,
+        selectionPendingSpriteId,
         touchDragBlocked,
         handleFramePointerDown,
         handleFramePointerUp,
@@ -377,16 +97,17 @@ export const Timeline: React.FC = () => {
 
     const [currentBatch, setCurrentBatch] = React.useState(0);
 
-    const getPreviewPixels = React.useCallback((sprite: { pixelData: (string | null)[]; overlayPixelData: (string | null)[] }) => {
+    const getPreviewPixels = React.useCallback((sprite: Sprite): PixelData => {
         if (isOverlayStacked) {
             // While selecting with pointer held, show top-only in stacked mode.
             if (isPaintSelecting || (isSelectionMode && isFramePointerDown)) return sprite.overlayPixelData;
             return getCompositePixelData(sprite);
         }
-        return activeLayer === 'base' ? sprite.pixelData : sprite.overlayPixelData;
-    }, [activeLayer, getCompositePixelData, isOverlayStacked, isPaintSelecting, isSelectionMode, isFramePointerDown]);
+        return getSpriteLayerPixels(sprite, activeLayer);
+    }, [activeLayer, isOverlayStacked, isPaintSelecting, isSelectionMode, isFramePointerDown]);
 
-    const handleFrameMouseDown = React.useCallback((_e: React.MouseEvent, index: number, sprite: Sprite) => {
+    const handleFrameMouseDown = React.useCallback((e: React.MouseEvent, index: number, sprite: Sprite) => {
+        void e;
         setIsPlaying(false);
         const targetBatch = Math.floor(index / 8);
         setCurrentBatch(prev => {
@@ -398,7 +119,7 @@ export const Timeline: React.FC = () => {
         }
     }, [setIsPlaying, setActiveSpriteId, isPaintSelecting]);
 
-    const handleFrameClick = React.useCallback((_e: React.MouseEvent, _index: number, _sprite: Sprite) => {
+    const handleFrameClick = React.useCallback(() => {
         // Tap only activates frame (handled by handleFrameMouseDown).
         // Selection is exclusively via long-press paint-select.
     }, []);
@@ -406,36 +127,29 @@ export const Timeline: React.FC = () => {
     const handleBulkDelete = React.useCallback(() => {
         if (selectedSpriteIds.size === 0) return;
 
-        // Convert Set to Array for processing
         const idsToDelete = Array.from(selectedSpriteIds);
-
-        // We'll iterate and delete, but since deleteSprite might change the array causing index shifts if done by index,
-        // we should rely on IDs. The context deleteSprite takes an ID.
-        // We need to be careful about the active sprite being deleted.
 
         idsToDelete.forEach(id => {
             deleteSprite(id);
         });
 
         setSelectedSpriteIds(new Set());
-    }, [selectedSpriteIds, deleteSprite]);
+    }, [selectedSpriteIds, deleteSprite, setSelectedSpriteIds]);
 
     const handleBulkDuplicate = React.useCallback(() => {
-        const sortedSelected = sprites
-            .filter(s => selectedSpriteIds.has(s.id))
-            .sort((a, b) => sprites.indexOf(a) - sprites.indexOf(b));
+        const selectedSprites = getSelectedSpritesInTimelineOrder(sprites, selectedSpriteIds);
 
-        if (sortedSelected.length === 0) return;
+        if (selectedSprites.length === 0) return;
 
         const blank = new Array(TOTAL_PIXELS).fill(null);
-        const importData = sortedSelected.map(s => ({
+        const importData = selectedSprites.map(s => ({
             name: `${s.name} (Copy)`,
             pixels: isOverlayStacked
-                ? s.pixelData
-                : (activeLayer === 'base' ? s.pixelData : blank),
+                ? pixelDataToColorArray(s.pixelData, palette)
+                : (activeLayer === 'base' ? pixelDataToColorArray(s.pixelData, palette) : blank),
             overlayPixels: isOverlayStacked
-                ? s.overlayPixelData
-                : (activeLayer === 'top' ? s.overlayPixelData : blank)
+                ? pixelDataToColorArray(s.overlayPixelData, palette)
+                : (activeLayer === 'top' ? pixelDataToColorArray(s.overlayPixelData, palette) : blank)
         }));
 
         const newIds = importMultipleFromJSON(importData);
@@ -450,7 +164,7 @@ export const Timeline: React.FC = () => {
         if (newIds.length > 0) {
             setActiveSpriteId(newIds[0]);
         }
-    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId, activeLayer, isOverlayStacked]);
+    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId, activeLayer, isOverlayStacked, palette, setSelectedSpriteIds]);
 
     const handleAddFrameMouseDown = React.useCallback(() => {
         setIsPlaying(false);
@@ -471,86 +185,20 @@ export const Timeline: React.FC = () => {
         }
     }, []);
 
-    // Keyboard Shortcuts
-    React.useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            const activeElement = document.activeElement;
-            const isInput = activeElement instanceof HTMLInputElement ||
-                activeElement instanceof HTMLTextAreaElement ||
-                activeElement?.hasAttribute('contenteditable');
-
-            if (isInput) return;
-
-            const isCmd = e.metaKey || e.ctrlKey;
-            const isShift = e.shiftKey;
-
-            if (isShift && e.code === 'KeyN') {
-                e.preventDefault();
-                if (selectedSpriteIds.size > 0) {
-                    handleBulkDuplicate();
-                } else {
-                    duplicateSprite();
-                }
-            }
-
-            // Select All Frames (Cmd+A)
-            if (isCmd && e.code === 'KeyA') {
-                e.preventDefault();
-                setIsSelectionMode(true); // Ensure selection mode is on
-                setSelectedSpriteIds(new Set(spritesRef.current.map(s => s.id)));
-            }
-
-            // Deselect Frames (Cmd+Shift+A)
-            if (isCmd && isShift && e.code === 'KeyA') {
-                e.preventDefault();
-                if (selectedSpriteIds.size > 0) {
-                    setSelectedSpriteIds(new Set());
-                    setIsSelectionMode(false);
-                }
-            }
-
-            // Shift+Delete: Bulk delete selected, or delete active frame
-            if (isShift && (e.code === 'Delete' || e.code === 'Backspace')) {
-                e.preventDefault();
-                if (selectedSpriteIds.size > 0) {
-                    handleBulkDelete();
-                } else {
-                    deleteSprite();
-                }
-            }
-
-            if (/^[1-8]$/.test(e.key)) {
-                const localIndex = parseInt(e.key) - 1;
-                const globalIndex = (currentBatch * BATCH_SIZE) + localIndex;
-                const targetSprite = spritesRef.current[globalIndex];
-                if (targetSprite) setActiveSpriteId(targetSprite.id);
-            }
-            if (e.key === '9') {
-                setCurrentBatch(prev => {
-                    const newBatch = Math.max(0, prev - 1);
-                    const firstIdx = newBatch * BATCH_SIZE;
-                    if (spritesRef.current[firstIdx]) setActiveSpriteId(spritesRef.current[firstIdx].id);
-                    return newBatch;
-                });
-            }
-            if (e.key === '0') {
-                setCurrentBatch(prev => {
-                    const maxBatch = Math.floor((spritesRef.current.length - 1) / BATCH_SIZE);
-                    const newBatch = Math.min(prev + 1, maxBatch);
-                    if (newBatch !== prev) {
-                        const firstIdx = newBatch * BATCH_SIZE;
-                        if (spritesRef.current[firstIdx]) setActiveSpriteId(spritesRef.current[firstIdx].id);
-                    }
-                    return newBatch;
-                });
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [setActiveSpriteId, currentBatch, selectedSpriteIds, duplicateSprite, handleBulkDuplicate, handleBulkDelete]);
-
-    const prevActiveIdRef = React.useRef(activeSpriteId);
+    useTimelineKeyboardShortcuts({
+        batchSize: BATCH_SIZE,
+        currentBatch,
+        deleteSprite,
+        duplicateSprite,
+        handleBulkDelete,
+        handleBulkDuplicate,
+        selectedSpriteIds,
+        setActiveSpriteId,
+        setCurrentBatch,
+        setIsSelectionMode,
+        setSelectedSpriteIds,
+        spritesRef
+    });
 
     const [activeDragId, setActiveDragId] = React.useState<number | null>(null);
     const sensors = useSensors(
@@ -562,6 +210,20 @@ export const Timeline: React.FC = () => {
     );
 
     const [isDragCoolingDown, setIsDragCoolingDown] = React.useState(false);
+    const {
+        dragHintDirection,
+        dragHintPosition,
+        handleFrameMouseEnter,
+        handleFrameMouseLeave
+    } = useTimelineDragHint({
+        activeDragId,
+        isPaintSelecting,
+        isPlaying,
+        selectedSpriteIds,
+        sprites,
+        timelineContainerRef,
+        timelineRef
+    });
 
     const handleDragStart = (event: DragStartEvent) => {
         cancelLongPress();
@@ -610,7 +272,7 @@ export const Timeline: React.FC = () => {
                         .map((s, i) => selectedSpriteIds.has(s.id) ? i : -1)
                         .filter(i => i !== -1);
 
-                    moveSprites(selectedIndices, newIndex);
+                    moveSprites(selectedIndices, newIndex, oldIndex);
                 } else {
                     moveSprite(oldIndex, newIndex);
                 }
@@ -631,72 +293,34 @@ export const Timeline: React.FC = () => {
         };
     }, [activeDragId]);
 
-    React.useEffect(() => {
-        const container = timelineRef.current?.querySelector('.timeline-frame-list') as HTMLElement;
-        if (container && activeDragId === null && !isDragCoolingDown && !isPointerDownRef.current) {
-            const index = sprites.findIndex(s => s.id === activeSpriteId);
-            if (index === -1) return;
-
-            const isSmall = window.innerWidth <= 1024;
-            const FRAME_SIZE = isSmall ? 75 : 100;
-            const listWidth = container.clientWidth;
-            const spacerWidth = (listWidth / 2) - (FRAME_SIZE / 2);
-
-            const frameLeft = (index * FRAME_SIZE) + spacerWidth;
-            const scrollLeft = container.scrollLeft;
-            const frameOffset = frameLeft - scrollLeft;
-
-            const BUFFER = FRAME_SIZE * 2;
-            const isNearLeft = frameOffset < BUFFER;
-            const isNearRight = frameOffset > listWidth - BUFFER - FRAME_SIZE;
-
-            if (isPlaying) {
-                const targetScroll = frameLeft - (listWidth / 2) + (FRAME_SIZE / 2);
-                container.scrollTo({ left: targetScroll, behavior: 'auto' });
-            } else if (isNearLeft || isNearRight) {
-                const targetScroll = frameLeft - (listWidth / 2) + (FRAME_SIZE / 2);
-                container.scrollTo({ left: targetScroll, behavior: 'smooth' });
-            }
-        }
-        prevActiveIdRef.current = activeSpriteId;
-    }, [activeSpriteId, isPlaying, sprites, activeDragId, isDragCoolingDown]);
-
-    React.useEffect(() => {
-        if (activeDragId !== null || isDragCoolingDown) return;
-
-        const index = sprites.findIndex(s => s.id === activeSpriteId);
-        if (index !== -1) {
-            const batch = Math.floor(index / BATCH_SIZE);
-            if (batch !== currentBatch) setCurrentBatch(batch);
-        }
-    }, [activeSpriteId, sprites, currentBatch, BATCH_SIZE, activeDragId, isDragCoolingDown]);
-
-    // FPS Rapid Adjustment
-    const fpsIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-    const fpsTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const stopFpsChange = React.useCallback(() => {
-        if (fpsIntervalRef.current) {
-            clearInterval(fpsIntervalRef.current);
-            fpsIntervalRef.current = null;
-        }
-        if (fpsTimeoutRef.current) {
-            clearTimeout(fpsTimeoutRef.current);
-            fpsTimeoutRef.current = null;
-        }
-    }, []);
-
-    const startFpsChange = React.useCallback((delta: number) => {
-        setFps(prev => Math.max(1, Math.min(60, prev + delta)));
-        fpsTimeoutRef.current = setTimeout(() => {
-            fpsIntervalRef.current = setInterval(() => {
-                setFps(prev => Math.max(1, Math.min(60, prev + delta)));
-            }, 80);
-        }, 400);
-    }, [setFps]);
+    useTimelineActiveFrameScroll({
+        activeDragId,
+        activeSpriteId,
+        batchSize: BATCH_SIZE,
+        currentBatch,
+        isDragCoolingDown,
+        isPlaying,
+        isPointerDownRef,
+        setCurrentBatch,
+        sprites,
+        timelineRef
+    });
 
     return (
         <div ref={timelineRef} className="timeline-section">
+            {dragHintPosition && (
+                <div
+                    className={`timeline-drag-hint ${dragHintDirection === 'left' ? 'is-left' : ''}`}
+                    style={{
+                        '--timeline-drag-hint-left': `${dragHintPosition.left}px`,
+                        '--timeline-drag-hint-top': `${dragHintPosition.top}px`
+                    } as TimelineDragHintVars}
+                    aria-hidden="true"
+                >
+                    <ArrowUp size={24} strokeWidth={2.75} />
+                </div>
+            )}
+
             <div className="timeline-header">
                 <div className="timeline-controls-left">
                     {selectedSpriteIds.size === 0 && (
@@ -748,10 +372,6 @@ export const Timeline: React.FC = () => {
                             <button
                                 className="control-btn-small delete-confirm"
                                 onClick={handleBulkDelete}
-                                style={{
-                                    backgroundColor: '#ff4444',
-                                    color: 'white'
-                                }}
                             >
                                 Delete ({selectedSpriteIds.size})
                             </button>
@@ -759,7 +379,7 @@ export const Timeline: React.FC = () => {
                     )}
                 </div>
                 {!isPlaying && (
-                    <div className="file-controls" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div className="file-controls">
                         <ImportExportMenu
                             selectedSpriteIds={selectedSpriteIds}
                             setSelectedSpriteIds={setSelectedSpriteIds}
@@ -787,39 +407,9 @@ export const Timeline: React.FC = () => {
                     ref={timelineContainerRef}
                     className="timeline-frame-list"
                     onWheel={handleTimelineWheel}
-                    style={{ flex: 1, overflowX: 'auto', minWidth: 0 }}
                 >
                     <div className="timeline-spacer" />
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '0 8px',
-                        color: '#888',
-                        fontSize: '0.8rem',
-                        gap: '4px',
-                        height: '100%'
-                    }}>
-                        <button
-                            className="secondary-btn-small"
-                            onMouseDown={() => startFpsChange(-1)}
-                            onMouseUp={stopFpsChange}
-                            onMouseLeave={stopFpsChange}
-                            style={{ padding: '2px 4px', minWidth: '20px' }}
-                        >
-                            &lt;
-                        </button>
-                        <span style={{ minWidth: '45px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{fps} FPS</span>
-                        <button
-                            className="secondary-btn-small"
-                            onMouseDown={() => startFpsChange(1)}
-                            onMouseUp={stopFpsChange}
-                            onMouseLeave={stopFpsChange}
-                            style={{ padding: '2px 4px', minWidth: '20px' }}
-                        >
-                            &gt;
-                        </button>
-                    </div>
+                    <TimelineFpsControls fps={fps} setFps={setFps} />
 
                     <SortableContext
                         items={sprites.map(s => s.id)}
@@ -835,15 +425,20 @@ export const Timeline: React.FC = () => {
                                         id={sprite.id}
                                         index={index}
                                         sprite={sprite}
+                                        palette={palette}
                                         previewPixels={getPreviewPixels(sprite)}
                                         isActive={activeDragId === null && sprite.id === activeSpriteId}
                                         dragAccepted={activeDragId !== null}
                                         onMouseDown={handleFrameMouseDown}
+                                        onMouseEnter={handleFrameMouseEnter}
+                                        onMouseLeave={handleFrameMouseLeave}
                                         onClick={handleFrameClick}
                                         onPointerDown={handleFramePointerDown}
                                         onPointerUp={handleFramePointerUp}
                                         onPointerEnter={handleFramePointerEnter}
                                         isSelected={selectedSpriteIds.has(sprite.id)}
+                                        isSelectionPending={selectionPendingSpriteId === sprite.id}
+                                        selectionPendingDurationMs={TIMELINE_SELECTION_LONG_PRESS_DELAY_MS}
                                         forceDragging={
                                             !isPaintSelecting && !touchDragBlocked && (
                                                 activeDragId === sprite.id ||
@@ -859,37 +454,19 @@ export const Timeline: React.FC = () => {
 
                     {/* Add Frame / Mulit-Duplicate Button(s) */}
                     {isSelectionMode && selectedSpriteIds.size > 0 ? (
-                        <div style={{ display: 'inline-flex' }}>
-                            {/* Render ghosts of selected sprites */}
-                            {(() => {
-                                // Sort selected IDs by index to maintain order
-                                const selectedSprites = sprites
-                                    .filter(s => selectedSpriteIds.has(s.id))
-                                    .sort((a, b) => {
-                                        const idxA = sprites.indexOf(a);
-                                        const idxB = sprites.indexOf(b);
-                                        return idxA - idxB;
-                                    });
-
-                                return selectedSprites.map((sprite, i) => (
-                                    <TimelineFrame
-                                        key={`ghost-${sprite.id}`}
-                                        sprite={sprite}
-                                        previewPixels={getPreviewPixels(sprite)}
-                                        isAdd={i === 0} // Only first one has +
-                                        index={sprites.length + i} // Virtual index
-                                        isActive={false}
-                                        isGhost={true}
-                                        onMouseDown={i === 0 ? handleBulkDuplicate : () => { }} // Only first one clicks
-                                    />
-                                ));
-                            })()}
-                        </div>
+                        <SelectedFrameGhostStrip
+                            sprites={sprites}
+                            selectedSpriteIds={selectedSpriteIds}
+                            palette={palette}
+                            getPreviewPixels={getPreviewPixels}
+                            onDuplicate={handleBulkDuplicate}
+                        />
                     ) : (
                         activeSprite && sprites.length < 64 && (
-                            <div style={{ display: 'inline-block' }}>
+                            <div className="timeline-add-frame-wrapper">
                                 <TimelineFrame
                                     sprite={activeSprite}
+                                    palette={palette}
                                     previewPixels={getPreviewPixels(activeSprite)}
                                     isAdd={true}
                                     index={sprites.length}
@@ -903,55 +480,14 @@ export const Timeline: React.FC = () => {
                 </div>
 
                 <DragOverlay>
-                    {activeDragId !== null ? (() => {
-                        // Check if dragging part of selection
-                        if (isSelectionMode && selectedSpriteIds.has(activeDragId)) {
-                            const selectedSprites = sprites
-                                .filter(s => selectedSpriteIds.has(s.id))
-                                .sort((a, b) => {
-                                    const idxA = sprites.indexOf(a);
-                                    const idxB = sprites.indexOf(b);
-                                    return idxA - idxB;
-                                });
-
-                            return (
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                    {selectedSprites.map((sprite, i) => (
-                                        <TimelineFrame
-                                            key={`overlay-${sprite.id}`}
-                                            sprite={sprite}
-                                            previewPixels={getPreviewPixels(sprite)}
-                                            index={i}
-                                            isActive={false}
-                                            isSelected={true}
-                                            onMouseDown={() => { }}
-                                            onClick={() => { }}
-                                            onPointerDown={() => { }}
-                                            onPointerUp={() => { }}
-                                            onPointerEnter={() => { }}
-                                        />
-                                    ))}
-                                </div>
-                            );
-                        }
-
-                        // Single item drag
-                        const sprite = sprites.find(s => s.id === activeDragId);
-                        if (!sprite) return null;
-                        return (
-                            <TimelineFrame
-                                sprite={sprite}
-                                previewPixels={getPreviewPixels(sprite)}
-                                index={0} // Index doesn't matter for overlay
-                                isActive={true}
-                                onMouseDown={() => { }}
-                                onClick={() => { }}
-                                onPointerDown={() => { }}
-                                onPointerUp={() => { }}
-                                onPointerEnter={() => { }}
-                            />
-                        );
-                    })() : null}
+                    <TimelineDragOverlayContent
+                        activeDragId={activeDragId}
+                        sprites={sprites}
+                        selectedSpriteIds={selectedSpriteIds}
+                        isSelectionMode={isSelectionMode}
+                        palette={palette}
+                        getPreviewPixels={getPreviewPixels}
+                    />
                 </DragOverlay>
             </DndContext>
         </div>

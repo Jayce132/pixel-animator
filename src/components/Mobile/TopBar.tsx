@@ -1,30 +1,30 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import React, { useRef, useEffect } from 'react';
+import { useEditorUiStore } from '../../stores/editorStore';
+import { selectCanClear, selectCanRedo, selectCanUndo } from '../../stores/editorSelectors';
 import { PRESET_COLORS } from '../../types';
 
 const MAX_RECENT = 8;
+type SwatchVars = React.CSSProperties & Record<'--swatch-color', string>;
 
 export const TopBar: React.FC = () => {
-    const {
-        currentTool,
-        setTool,
-        undo,
-        redo,
-        clearCanvas,
-        canUndo,
-        canRedo,
-        canClear,
-        selectedPixels,
-        clearSelection,
-        brushSize,
-        setBrushSize,
-        currentColor,
-        setCurrentColor,
-        recentColors,
-    } = useEditor();
+    const undo = useEditorUiStore(state => state.undo);
+    const redo = useEditorUiStore(state => state.redo);
+    const clearCanvas = useEditorUiStore(state => state.clearCanvas);
+    const canUndo = useEditorUiStore(selectCanUndo);
+    const canRedo = useEditorUiStore(selectCanRedo);
+    const canClear = useEditorUiStore(selectCanClear);
+    const selectedPixels = useEditorUiStore(state => state.selectedPixels);
+    const clearSelection = useEditorUiStore(state => state.clearSelection);
+    const currentTool = useEditorUiStore(state => state.currentTool);
+    const setTool = useEditorUiStore(state => state.setTool);
+    const brushSize = useEditorUiStore(state => state.brushSize);
+    const setBrushSize = useEditorUiStore(state => state.setBrushSize);
+    const currentColor = useEditorUiStore(state => state.currentColor);
+    const setCurrentColor = useEditorUiStore(state => state.setCurrentColor);
+    const recentColors = useEditorUiStore(state => state.recentColors);
 
     const topBarRef = useRef<HTMLDivElement>(null);
-    const [hasRevealedTools, setHasRevealedTools] = useState(recentColors.length > 0);
+    const hasRevealedToolsRef = useRef(recentColors.length > 0);
     const animationAbortedRef = useRef(false);
 
     useEffect(() => {
@@ -41,7 +41,7 @@ export const TopBar: React.FC = () => {
                 await new Promise(r => setTimeout(r, 450));
                 if (animationAbortedRef.current) return;
                 topBarRef.current.scrollTo({ left: 0, behavior: 'smooth' });
-            } catch (e) {
+            } catch {
                 // Ignore fallback issues
             }
         };
@@ -49,15 +49,15 @@ export const TopBar: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (recentColors.length > 0 && !hasRevealedTools) {
-            setHasRevealedTools(true);
+        if (recentColors.length > 0 && !hasRevealedToolsRef.current) {
+            hasRevealedToolsRef.current = true;
             if (topBarRef.current) {
                 requestAnimationFrame(() => {
                     topBarRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
                 });
             }
         }
-    }, [recentColors.length, hasRevealedTools]);
+    }, [recentColors.length]);
 
     const displaySlots = recentColors.length >= 4 ? MAX_RECENT : 4;
     const recentSlots = Array.from({ length: displaySlots });
@@ -87,6 +87,7 @@ export const TopBar: React.FC = () => {
                         onClick={() => {
                             if (selectedPixels.size > 0) {
                                 clearSelection();
+                                setTool('brush');
                             } else {
                                 setTool(currentTool === 'select' ? 'brush' : 'select');
                             }
@@ -118,9 +119,9 @@ export const TopBar: React.FC = () => {
             {/* Actions */}
             {(canUndo || canRedo || canClear) && (
                 <div className="top-bar-group">
-                    <button className="top-bar-btn" disabled={!canUndo} onClick={undo} style={{ opacity: canUndo ? 1 : 0.4, cursor: canUndo ? 'pointer' : 'default' }}>Undo</button>
-                    <button className="top-bar-btn" disabled={!canRedo} onClick={redo} style={{ opacity: canRedo ? 1 : 0.4, cursor: canRedo ? 'pointer' : 'default' }}>Redo</button>
-                    <button className="top-bar-btn" disabled={!canClear} onClick={clearCanvas} style={{ opacity: canClear ? 1 : 0.4, cursor: canClear ? 'pointer' : 'default' }}>Clear</button>
+                    <button className="top-bar-btn" disabled={!canUndo} onClick={undo}>Undo</button>
+                    <button className="top-bar-btn" disabled={!canRedo} onClick={redo}>Redo</button>
+                    <button className="top-bar-btn" disabled={!canClear} onClick={clearCanvas}>Clear</button>
                 </div>
             )}
 
@@ -153,14 +154,14 @@ export const TopBar: React.FC = () => {
                                 return (
                                     <div
                                         key={color}
-                                        className={`top-bar-swatch ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
-                                        style={{ backgroundColor: color }}
+                                        className={`top-bar-swatch has-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
+                                        style={{ '--swatch-color': color } as SwatchVars}
                                         onClick={() => setCurrentColor(color)}
                                         title={color}
                                     />
                                 );
                             }
-                            return <div key={`empty-${index}`} className="top-bar-swatch empty" style={{ opacity: 0.1, background: '#333' }} />;
+                            return <div key={`empty-${index}`} className="top-bar-swatch empty" />;
                         })}
                     </div>
                 </>
@@ -174,8 +175,8 @@ export const TopBar: React.FC = () => {
                 {PRESET_COLORS.map((color) => (
                     <div
                         key={color}
-                        className={`top-bar-swatch ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
-                        style={{ backgroundColor: color }}
+                        className={`top-bar-swatch has-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
+                        style={{ '--swatch-color': color } as SwatchVars}
                         onClick={() => setCurrentColor(color)}
                         title={color}
                     />

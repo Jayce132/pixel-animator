@@ -1,22 +1,21 @@
 import React from 'react';
-import { useEditor } from '../../contexts/editorContextShared';
+import { useEditorUiStore } from '../../stores/editorStore';
+import { selectCanClear, selectCanRedo, selectCanUndo } from '../../stores/editorSelectors';
 
 export const EditorControls: React.FC = () => {
-    const {
-        currentTool,
-        setTool,
-        undo,
-        redo,
-        clearCanvas,
-        canUndo,
-        canRedo,
-        canClear,
-        selectedPixels,
-        clearSelection,
-        brushSize,
-        setBrushSize,
-        recentColors
-    } = useEditor();
+    const undo = useEditorUiStore(state => state.undo);
+    const redo = useEditorUiStore(state => state.redo);
+    const clearCanvas = useEditorUiStore(state => state.clearCanvas);
+    const canUndo = useEditorUiStore(selectCanUndo);
+    const canRedo = useEditorUiStore(selectCanRedo);
+    const canClear = useEditorUiStore(selectCanClear);
+    const selectedPixels = useEditorUiStore(state => state.selectedPixels);
+    const clearSelection = useEditorUiStore(state => state.clearSelection);
+    const currentTool = useEditorUiStore(state => state.currentTool);
+    const setTool = useEditorUiStore(state => state.setTool);
+    const brushSize = useEditorUiStore(state => state.brushSize);
+    const setBrushSize = useEditorUiStore(state => state.setBrushSize);
+    const recentColors = useEditorUiStore(state => state.recentColors);
 
     return (
         <>
@@ -34,6 +33,7 @@ export const EditorControls: React.FC = () => {
                             if (selectedPixels.size > 0) {
                                 // If we have a selection, this button acts as Deselect
                                 clearSelection();
+                                setTool('brush');
                             } else {
                                 setTool(currentTool === 'select' ? 'brush' : 'select');
                             }
@@ -46,18 +46,16 @@ export const EditorControls: React.FC = () => {
 
             {/* Brush Size Controls */}
             {recentColors.length > 0 && (currentTool === 'brush' || currentTool === 'eraser') && (
-                <div className="tool-group" style={{ flexDirection: 'row', gap: '4px' }}>
+                <div className="tool-group brush-size-group">
                     <button
-                        className={`tool-btn ${brushSize === 1 ? 'active' : ''}`}
+                        className={`tool-btn brush-size-btn ${brushSize === 1 ? 'active' : ''}`}
                         onClick={() => setBrushSize(1)}
-                        style={{ fontSize: '0.8rem' }}
                     >
                         1x
                     </button>
                     <button
-                        className={`tool-btn ${brushSize === 2 ? 'active' : ''}`}
+                        className={`tool-btn brush-size-btn ${brushSize === 2 ? 'active' : ''}`}
                         onClick={() => setBrushSize(2)}
-                        style={{ fontSize: '0.8rem' }}
                     >
                         2x
                     </button>
@@ -66,9 +64,9 @@ export const EditorControls: React.FC = () => {
 
             {(canUndo || canRedo || canClear) && (
                 <div className="action-group">
-                    <button className="action-btn" disabled={!canUndo} onClick={undo} style={{ opacity: canUndo ? 1 : 0.4, cursor: canUndo ? 'pointer' : 'default' }}>Undo</button>
-                    <button className="action-btn" disabled={!canRedo} onClick={redo} style={{ opacity: canRedo ? 1 : 0.4, cursor: canRedo ? 'pointer' : 'default' }}>Redo</button>
-                    <button className="action-btn" disabled={!canClear} onClick={clearCanvas} style={{ opacity: canClear ? 1 : 0.4, cursor: canClear ? 'pointer' : 'default' }}>Clear</button>
+                    <button className="action-btn" disabled={!canUndo} onClick={undo}>Undo</button>
+                    <button className="action-btn" disabled={!canRedo} onClick={redo}>Redo</button>
+                    <button className="action-btn" disabled={!canClear} onClick={clearCanvas}>Clear</button>
                 </div>
             )}
         </>

@@ -1,4 +1,9 @@
-import type { Sprite } from '../types';
+import type { Palette, PixelData, Sprite } from '../types';
+import {
+    createBlankPixelData,
+    pixelDataToColorArray,
+    TRANSPARENT_PIXEL
+} from './pixelData';
 import type { LayerExportMode } from './export';
 
 export const getTimestamp = (): string => {
@@ -11,19 +16,19 @@ export const getTimestamp = (): string => {
     return `${yyyy}${mm}${dd}_${hh}${min}`;
 };
 
-export const compressPixelData = (pixelData: (string | null)[], palette: string[]): (number | null)[] => {
-    return pixelData.map(color => {
-        if (color === null) return null;
-        const index = palette.indexOf(color);
-        return index !== -1 ? index : null; // If color not in palette (which shouldn't happen), return null or perhaps add it? For now, assume it's in palette.
-    });
-};
+export const compressPixelData = (pixelData: PixelData): (number | null)[] => (
+    Array.from(pixelData, value => (
+        value === TRANSPARENT_PIXEL ? null : value - 1
+    ))
+);
 
-export const decompressPixelData = (indices: (number | null)[], palette: string[]): (string | null)[] => {
-    return indices.map(index => {
-        if (index === null || index < 0 || index >= palette.length) return null;
-        return palette[index];
+export const decompressPixelData = (indices: (number | null)[], palette: Palette): PixelData => {
+    const pixelData = createBlankPixelData(indices.length);
+    indices.forEach((index, pixelIndex) => {
+        if (index === null || index < 0 || index >= palette.length) return;
+        pixelData[pixelIndex] = index + 1;
     });
+    return pixelData;
 };
 
 export interface ProjectJSON {
@@ -42,7 +47,7 @@ export interface ProjectJSON {
     }[];
 }
 
-export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: string[], gridSize: number) => {
+export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, gridSize: number) => {
     const projectData: ProjectJSON = {
         type: 'project',
         version: '1.0',
@@ -50,12 +55,12 @@ export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: num
         width: gridSize,
         height: gridSize,
         fps: fps,
-        palette: palette,
+        palette,
         frames: sprites.map(sprite => ({
             id: sprite.id,
             name: sprite.name,
-            pixelData: compressPixelData(sprite.pixelData, palette),
-            overlayPixelData: compressPixelData(sprite.overlayPixelData, palette)
+            pixelData: compressPixelData(sprite.pixelData),
+            overlayPixelData: compressPixelData(sprite.overlayPixelData)
         }))
     };
 
@@ -95,6 +100,7 @@ export const exportSpritesToJSON = (
     projectName: string,
     sprites: Sprite[],
     layerMode: LayerExportMode,
+    palette: Palette,
     frameIndex?: number
 ) => {
     // We export a subset of data representing individual frames
@@ -104,15 +110,15 @@ export const exportSpritesToJSON = (
 
         // Apply layer mode logic
         if (layerMode === 'top') {
-            pixelsToExport = new Array(sprite.pixelData.length).fill(null);
+            pixelsToExport = createBlankPixelData(sprite.pixelData.length);
         } else if (layerMode === 'base') {
-            overlayPixelsToExport = new Array(sprite.overlayPixelData.length).fill(null);
+            overlayPixelsToExport = createBlankPixelData(sprite.overlayPixelData.length);
         }
 
         return {
             name: sprite.name,
-            pixels: pixelsToExport,
-            overlayPixels: overlayPixelsToExport
+            pixels: pixelDataToColorArray(pixelsToExport, palette),
+            overlayPixels: pixelDataToColorArray(overlayPixelsToExport, palette)
         };
     });
 

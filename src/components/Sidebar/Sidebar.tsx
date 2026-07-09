@@ -21,7 +21,7 @@ export const Sidebar: React.FC = () => {
                 await new Promise(r => setTimeout(r, 450));
                 if (animationAbortedRef.current) return;
                 paletteRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-            } catch (e) {
+            } catch {
                 // Fallback for older browsers
             }
         };

@@ -1,36 +1,35 @@
-import type { Sprite } from '../types';
+import type { Palette, PixelData, Sprite } from '../types';
 import { getTimestamp } from './save';
 import { GIFEncoder, applyPalette } from 'gifenc';
+import { getExportLayers } from './compositing';
+import { getPixelColor } from './pixelData';
 
 export type LayerExportMode = 'merged' | 'base' | 'top';
 
 const renderFrameToContext = (
     ctx: CanvasRenderingContext2D,
     sprite: Sprite,
+    palette: Palette,
     gridSize: number,
     scale: number,
     layerMode: LayerExportMode,
     offsetX: number = 0,
     offsetY: number = 0
 ) => {
-    // Helper to draw a layer
-    const drawLayer = (pixelData: (string | null)[]) => {
-        pixelData.forEach((color, i) => {
-            if (color !== null) {
+    // Draw each layer exposed by the selected export mode.
+    const drawLayer = (pixelData: PixelData) => {
+        for (let i = 0; i < pixelData.length; i++) {
+            const color = getPixelColor(pixelData, i, palette);
+            if (color) {
                 const x = (i % gridSize) * scale + offsetX;
                 const y = Math.floor(i / gridSize) * scale + offsetY;
                 ctx.fillStyle = color;
                 ctx.fillRect(x, y, scale, scale);
             }
-        });
+        }
     };
 
-    if (layerMode === 'merged' || layerMode === 'base') {
-        drawLayer(sprite.pixelData);
-    }
-    if (layerMode === 'merged' || layerMode === 'top') {
-        drawLayer(sprite.overlayPixelData);
-    }
+    getExportLayers(sprite, layerMode).forEach(drawLayer);
 };
 
 const triggerDownload = (canvas: HTMLCanvasElement, filename: string) => {
@@ -46,6 +45,7 @@ const triggerDownload = (canvas: HTMLCanvasElement, filename: string) => {
 export const exportFrameToPNG = (
     projectName: string,
     sprite: Sprite,
+    palette: Palette,
     frameIndex: number,
     gridSize: number,
     scale: number = 10,
@@ -60,7 +60,7 @@ export const exportFrameToPNG = (
     // Clear with transparent black
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    renderFrameToContext(ctx, sprite, gridSize, scale, layerMode);
+    renderFrameToContext(ctx, sprite, palette, gridSize, scale, layerMode);
 
     const formattedIndex = String(frameIndex + 1).padStart(2, '0');
     const filename = `${projectName}_frame_${formattedIndex}_${layerMode}_${getTimestamp()}.png`;
@@ -70,6 +70,7 @@ export const exportFrameToPNG = (
 export const exportSpriteSheetToPNG = (
     projectName: string,
     sprites: Sprite[],
+    palette: Palette,
     gridSize: number,
     scale: number = 10,
     layerMode: LayerExportMode = 'merged'
@@ -86,7 +87,7 @@ export const exportSpriteSheetToPNG = (
 
     sprites.forEach((sprite, index) => {
         const offsetX = index * gridSize * scale;
-        renderFrameToContext(ctx, sprite, gridSize, scale, layerMode, offsetX, 0);
+        renderFrameToContext(ctx, sprite, palette, gridSize, scale, layerMode, offsetX, 0);
     });
 
     const filename = `${projectName}_spritesheet_${layerMode}_${getTimestamp()}.png`;
@@ -94,25 +95,25 @@ export const exportSpriteSheetToPNG = (
 };
 
 // Helper to extract a global palette from all sprites
-const extractGlobalPalette = (sprites: Sprite[], layerMode: LayerExportMode): number[][] => {
+const extractGlobalPalette = (sprites: Sprite[], palette: Palette, layerMode: LayerExportMode): number[][] => {
     const uniqueColors = new Set<string>();
 
     sprites.forEach(sprite => {
-        if (layerMode === 'merged' || layerMode === 'base') {
-            sprite.pixelData.forEach(color => color && uniqueColors.add(color));
-        }
-        if (layerMode === 'merged' || layerMode === 'top') {
-            sprite.overlayPixelData.forEach(color => color && uniqueColors.add(color));
-        }
+        getExportLayers(sprite, layerMode).forEach(pixelData => {
+            for (let index = 0; index < pixelData.length; index++) {
+                const color = getPixelColor(pixelData, index, palette);
+                if (color) uniqueColors.add(color);
+            }
+        });
     });
 
-    const palette: number[][] = [[0, 0, 0, 0]]; // Index 0 is strictly transparent
+    const gifPalette: number[][] = [[0, 0, 0, 0]]; // Index 0 is strictly transparent
 
     uniqueColors.forEach(hex => {
         // Convert hex to rgb
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
         if (result) {
-            palette.push([
+            gifPalette.push([
                 parseInt(result[1], 16),
                 parseInt(result[2], 16),
                 parseInt(result[3], 16)
@@ -120,12 +121,13 @@ const extractGlobalPalette = (sprites: Sprite[], layerMode: LayerExportMode): nu
         }
     });
 
-    return palette;
+    return gifPalette;
 };
 
 export const exportProjectToGIF = (
     projectName: string,
     sprites: Sprite[],
+    palette: Palette,
     fps: number,
     gridSize: number,
     scale: number = 20, // 16 * 20 = 320px
@@ -136,7 +138,7 @@ export const exportProjectToGIF = (
     // 1. Setup the encoder
     const gif = GIFEncoder();
     const delay = Math.round(1000 / fps);
-    const globalPalette = extractGlobalPalette(sprites, layerMode);
+    const globalPalette = extractGlobalPalette(sprites, palette, layerMode);
 
     // 2. Setup workspaces
     // The base 16x16 canvas for merging layers together exactly as drawn
@@ -163,7 +165,7 @@ export const exportProjectToGIF = (
         scaledCtx.clearRect(0, 0, scaledCanvas.width, scaledCanvas.height);
 
         // Draw pixel data onto 16x16 (scale 1)
-        renderFrameToContext(baseCtx, sprite, gridSize, 1, layerMode);
+        renderFrameToContext(baseCtx, sprite, palette, gridSize, 1, layerMode);
 
         // Scale it up onto the 320x320
         scaledCtx.drawImage(baseCanvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
