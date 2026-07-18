@@ -16,6 +16,7 @@ export const EditorControls: React.FC = () => {
     const brushSize = useEditorUiStore(state => state.brushSize);
     const setBrushSize = useEditorUiStore(state => state.setBrushSize);
     const recentColors = useEditorUiStore(state => state.recentColors);
+    const isPlaying = useEditorUiStore(state => state.isPlaying);
 
     return (
         <>
@@ -29,6 +30,7 @@ export const EditorControls: React.FC = () => {
                     </button>
                     <button
                         className={`tool-btn ${currentTool === 'select' || selectedPixels.size > 0 ? 'active' : ''}`}
+                        disabled={isPlaying && selectedPixels.size === 0}
                         onClick={() => {
                             if (selectedPixels.size > 0) {
                                 // If we have a selection, this button acts as Deselect

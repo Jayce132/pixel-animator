@@ -21,6 +21,7 @@ export type EditorStateValues = Pick<
     | 'layerExportMode'
     | 'notification'
     | 'palette'
+    | 'presetCount'
     | 'projectName'
     | 'recentColors'
     | 'selectedPixels'
@@ -44,6 +45,7 @@ export const createInitialEditorState = (): EditorStateValues => ({
     layerExportMode: 'merged',
     notification: null,
     palette: mergePalettes(PRESET_COLORS),
+    presetCount: PRESET_COLORS.length,
     projectName: 'project_name',
     recentColors: [],
     selectedPixels: new Set(),

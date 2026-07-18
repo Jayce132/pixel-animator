@@ -5,7 +5,6 @@ import { useEditorUiStore } from '../../stores/editorStore';
 
 export const SelectionControls: React.FC = () => {
     const selectedPixels = useEditorUiStore(state => state.selectedPixels);
-    const isPlaying = useEditorUiStore(state => state.isPlaying);
     const flipSelectionHorizontal = useEditorUiStore(state => state.flipSelectionHorizontal);
     const flipSelectionVertical = useEditorUiStore(state => state.flipSelectionVertical);
     const rotateSelectionLeft = useEditorUiStore(state => state.rotateSelectionLeft);
@@ -83,51 +82,49 @@ export const SelectionControls: React.FC = () => {
                     Stamp (Enter)
                 </button>
             </div>
-            {!isPlaying && (
-                <div className="file-controls selection-tool-group">
-                    {/* Transform Tools */}
-                    <button className={`control-btn-small selection-icon-button ${activeActions.includes('flipH') ? 'active' : ''}`} onClick={flipSelectionHorizontal} title="Flip Horizontal (H)"><FlipHorizontal size={isMobile ? 12 : 14} strokeWidth={3} /></button>
-                    <button className={`control-btn-small selection-icon-button ${activeActions.includes('flipV') ? 'active' : ''}`} onClick={flipSelectionVertical} title="Flip Vertical (V)"><FlipVertical size={isMobile ? 12 : 14} strokeWidth={3} /></button>
-                    <button className={`control-btn-small selection-icon-button ${activeActions.includes('rotL') ? 'active' : ''}`} onClick={rotateSelectionLeft} title="Rotate Left (Q)"><RotateCcw size={isMobile ? 12 : 14} strokeWidth={3} /></button>
-                    <button className={`control-btn-small selection-icon-button ${activeActions.includes('rotR') ? 'active' : ''}`} onClick={rotateSelectionRight} title="Rotate Right (E)"><RotateCw size={isMobile ? 12 : 14} strokeWidth={3} /></button>
+            <div className="file-controls selection-tool-group">
+                {/* Transform Tools */}
+                <button className={`control-btn-small selection-icon-button ${activeActions.includes('flipH') ? 'active' : ''}`} onClick={flipSelectionHorizontal} title="Flip Horizontal (H)"><FlipHorizontal size={isMobile ? 12 : 14} strokeWidth={3} /></button>
+                <button className={`control-btn-small selection-icon-button ${activeActions.includes('flipV') ? 'active' : ''}`} onClick={flipSelectionVertical} title="Flip Vertical (V)"><FlipVertical size={isMobile ? 12 : 14} strokeWidth={3} /></button>
+                <button className={`control-btn-small selection-icon-button ${activeActions.includes('rotL') ? 'active' : ''}`} onClick={rotateSelectionLeft} title="Rotate Left (Q)"><RotateCcw size={isMobile ? 12 : 14} strokeWidth={3} /></button>
+                <button className={`control-btn-small selection-icon-button ${activeActions.includes('rotR') ? 'active' : ''}`} onClick={rotateSelectionRight} title="Rotate Right (E)"><RotateCw size={isMobile ? 12 : 14} strokeWidth={3} /></button>
 
-                    {/* Divider */}
-                    <div className="selection-controls-divider" />
+                {/* Divider */}
+                <div className="selection-controls-divider" />
 
-                    <button
-                        className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('left') ? 'active' : ''}`}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('left', 'down'); }}
-                        onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('left', 'up'); }}
-                        onPointerCancel={() => { dispatchVirtualKey('left', 'up'); }}
-                        onContextMenu={(e) => e.preventDefault()}
-                    ><span className="selection-nudge-arrow is-left">▾</span></button>
-                    <button
-                        className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('up') ? 'active' : ''}`}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('up', 'down'); }}
-                        onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('up', 'up'); }}
-                        onPointerCancel={() => { dispatchVirtualKey('up', 'up'); }}
-                        onContextMenu={(e) => e.preventDefault()}
-                    ><span className="selection-nudge-arrow is-up">▾</span></button>
-                    <button
-                        className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('down') ? 'active' : ''}`}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('down', 'down'); }}
-                        onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('down', 'up'); }}
-                        onPointerCancel={() => { dispatchVirtualKey('down', 'up'); }}
-                        onContextMenu={(e) => e.preventDefault()}
-                    ><span className="selection-nudge-arrow">▾</span></button>
-                    <button
-                        className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('right') ? 'active' : ''}`}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('right', 'down'); }}
-                        onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('right', 'up'); }}
-                        onPointerCancel={() => { dispatchVirtualKey('right', 'up'); }}
-                        onContextMenu={(e) => e.preventDefault()}
-                    ><span className="selection-nudge-arrow is-right">▾</span></button>
-                </div>
-            )}
+                <button
+                    className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('left') ? 'active' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('left', 'down'); }}
+                    onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('left', 'up'); }}
+                    onPointerCancel={() => { dispatchVirtualKey('left', 'up'); }}
+                    onContextMenu={(e) => e.preventDefault()}
+                ><span className="selection-nudge-arrow is-left">▾</span></button>
+                <button
+                    className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('up') ? 'active' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('up', 'down'); }}
+                    onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('up', 'up'); }}
+                    onPointerCancel={() => { dispatchVirtualKey('up', 'up'); }}
+                    onContextMenu={(e) => e.preventDefault()}
+                ><span className="selection-nudge-arrow is-up">▾</span></button>
+                <button
+                    className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('down') ? 'active' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('down', 'down'); }}
+                    onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('down', 'up'); }}
+                    onPointerCancel={() => { dispatchVirtualKey('down', 'up'); }}
+                    onContextMenu={(e) => e.preventDefault()}
+                ><span className="selection-nudge-arrow">▾</span></button>
+                <button
+                    className={`control-btn-small selection-icon-button selection-nudge-button ${activeActions.includes('right') ? 'active' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); dispatchVirtualKey('right', 'down'); }}
+                    onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); dispatchVirtualKey('right', 'up'); }}
+                    onPointerCancel={() => { dispatchVirtualKey('right', 'up'); }}
+                    onContextMenu={(e) => e.preventDefault()}
+                ><span className="selection-nudge-arrow is-right">▾</span></button>
+            </div>
         </div>
     );
 };

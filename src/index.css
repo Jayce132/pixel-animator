@@ -316,6 +316,7 @@ body {
 }
 
 .action-btn:disabled,
+.tool-btn:disabled,
 .top-bar-btn:disabled {
     opacity: 0.4;
     cursor: default;
@@ -785,6 +786,542 @@ body {
     width: 100%;
 }
 
+/* Palette header + hex editor */
+.palette-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.palette-header h3,
+.palette-sidebar .palette-header h3 {
+    width: auto;
+    margin-bottom: 0;
+}
+
+.palette-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.palette-settings-btn:hover {
+    color: var(--text-color);
+}
+
+.palette-settings-btn.active {
+    color: var(--accent-color);
+}
+
+/* Full-screen palette selector */
+.palette-selector-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-bg);
+}
+
+.palette-selector-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--panel-border);
+}
+
+.palette-selector-header h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+
+.palette-selector-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.palette-selector-close:hover {
+    color: var(--text-color);
+}
+
+/* Frame switcher (lives in the header): changes which frame the previews show */
+.palette-frames-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    padding: 0 16px;
+}
+
+.palette-frames-strip {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.palette-frames-strip::-webkit-scrollbar {
+    display: none;
+}
+
+.palette-frame-thumb {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    padding: 2px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.palette-frame-thumb canvas {
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    display: block;
+}
+
+.palette-frame-thumb.active {
+    border-color: var(--accent-color);
+}
+
+.palette-selector-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.palette-canvas-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    border-right: 1px solid var(--panel-border);
+    overflow-y: auto;
+}
+
+/* Previews grouped in their own row so the undo button always sits below */
+.palette-previews-row {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.palette-preview-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.palette-canvas-preview canvas {
+    width: 176px;
+    height: 176px;
+    image-rendering: pixelated;
+    background:
+        repeating-conic-gradient(rgba(255, 255, 255, 0.06) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    cursor: crosshair;
+}
+
+.palette-canvas-preview canvas.previewing {
+    border-color: var(--accent-color);
+}
+
+.palette-undo-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.palette-undo-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.palette-manual {
+    max-width: 200px;
+}
+
+.palette-manual ul {
+    margin: 0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.palette-manual li {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.palette-cap-note {
+    margin-top: 8px;
+    max-width: 180px;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* One fixed-track grid holds everything (current, hints, templates) so all
+   columns and wrapped rows align; wide palettes span multiple tracks. */
+.palette-selector-columns {
+    display: grid;
+    /* minmax lets the equal tracks stretch to fill the row — no dead strip
+       on the right when the width doesn't divide evenly */
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 24px;
+    align-items: start;
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.palette-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-sizing: border-box;
+    padding: 12px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.palette-column-title {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* The current column is the only editable one — the accented border sets it
+   apart. It spans grid tracks by its table count, like any wide palette. */
+.palette-column-current {
+    border-color: var(--accent-color);
+}
+
+/* Hint card: exactly two template tracks wide, stretched to row height */
+.palette-column-hints {
+    border-style: dashed;
+    grid-column: span 2;
+    align-self: stretch;
+    align-items: flex-start;
+}
+
+.palette-hints-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.palette-hints-heading {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.palette-hints-group p {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    margin: 0 0 6px;
+}
+
+/* Footer actions shared by CURRENT and template columns */
+.palette-column-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    width: 100%;
+}
+
+.palette-column-actions .secondary-btn-small:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.palette-danger {
+    color: #f27d7d;
+    border-color: #f27d7d;
+}
+
+/* Preset columns mirror the current column: one 20px row per color,
+   swatch + hex code. Width comes from the grid track (items stretch to
+   fill), so every column lines up exactly. */
+.palette-column-preset .palette-column-title {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Palettes >32 colors: extra 32-row tables side by side */
+.palette-preset-tables {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.palette-preset-list {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+}
+
+/* Rows are click-to-copy buttons */
+.palette-preset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+.palette-preset-hex {
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 20px;
+    color: var(--text-color);
+    text-transform: lowercase;
+}
+
+.palette-preset-row:hover .palette-preset-hex {
+    color: var(--accent-color);
+}
+
+.palette-preset-hex.copied {
+    color: var(--accent-color);
+}
+
+.palette-preset-apply {
+    margin-top: 8px;
+}
+
+/* Current palette: hex textareas with swatch gutters, one line per color,
+   wrapping into extra 32-row tables for longer palettes */
+.palette-hex-tables {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.palette-hex-editor {
+    display: flex;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+}
+
+.palette-hex-editor:focus-within {
+    border-color: var(--accent-color);
+}
+
+.palette-hex-gutter {
+    display: flex;
+    flex-direction: column;
+}
+
+.palette-hex-gutter-swatch {
+    height: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.palette-hex-gutter-swatch::before {
+    content: '';
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    background: var(--swatch-color, transparent);
+    border: 1px solid var(--panel-border);
+}
+
+.palette-hex-gutter-swatch.invalid::before {
+    border: 1px dashed var(--text-muted);
+    background: transparent;
+}
+
+/* Color highlighted from hovering a preview canvas */
+.palette-hex-gutter-swatch.highlight::before {
+    box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.palette-preset-row.highlight .palette-preset-hex {
+    color: var(--accent-color);
+}
+
+.palette-hex-textarea {
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    color: var(--text-color);
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 20px;
+    width: 8ch;
+    text-transform: lowercase;
+    white-space: pre;
+}
+
+/* Apply prompt */
+.palette-apply-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--panel-border);
+}
+
+.palette-apply-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-color);
+}
+
+.palette-download-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    color: var(--text-color);
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    width: 260px;
+    outline: none;
+}
+
+.palette-download-input:focus {
+    border-color: var(--accent-color);
+}
+
+/* Gear swatch that opens the palette selector from the mobile top bar */
+.top-bar-swatch.palette-gear {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px dashed var(--panel-border);
+    color: var(--text-muted);
+    padding: 0;
+    cursor: pointer;
+}
+
+/* Palette selector: mobile layout */
+@media (max-width: 768px) {
+    .palette-selector-header {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+
+    .palette-frames-bar {
+        padding: 0 4px;
+        gap: 6px;
+    }
+
+    .palette-frame-thumb {
+        width: 36px;
+        height: 36px;
+    }
+
+    /* Stack: previews on top, palettes below, one scroll area */
+    .palette-selector-body {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    /* Aside stays a column (previews row, then undo); previews go side by side */
+    .palette-canvas-preview {
+        gap: 12px;
+        padding: 12px;
+        border-right: none;
+        border-bottom: 1px solid var(--panel-border);
+        overflow-y: visible;
+    }
+
+    .palette-previews-row {
+        flex-direction: row;
+        justify-content: center;
+        gap: 12px;
+    }
+
+    .palette-canvas-preview canvas {
+        width: 120px;
+        height: 120px;
+    }
+
+    /* Hover instructions don't apply to touch */
+    .palette-manual {
+        display: none;
+    }
+
+    .palette-hints-hotkeys {
+        display: none;
+    }
+
+    .palette-selector-columns {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+        padding: 12px;
+        flex: initial;
+        overflow-y: visible;
+        min-height: auto;
+    }
+
+    .palette-apply-bar {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+
+    .palette-download-input {
+        width: 100%;
+        max-width: 260px;
+    }
+}
+
 /* Palette Sidebar (Desktop) */
 .palette-sidebar {
     width: 100%;
@@ -1045,6 +1582,49 @@ body {
     height: var(--dropper-progress);
     background: var(--dropper-color, var(--grid-bg));
     transition: height var(--dropper-transition-ms) linear;
+}
+
+.shape-hold-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 23;
+    pointer-events: none;
+}
+
+@property --shape-hold-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+.shape-hold-ring {
+    position: absolute;
+    left: var(--ring-left);
+    top: var(--ring-top);
+    width: 13%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: conic-gradient(var(--ring-color, #ffffff) var(--shape-hold-angle),
+            color-mix(in srgb, var(--ring-color, #ffffff) 28%, transparent) 0);
+    -webkit-mask: radial-gradient(closest-side, transparent 66%, #000 67%, #000 92%, transparent 93%);
+    mask: radial-gradient(closest-side, transparent 66%, #000 67%, #000 92%, transparent 93%);
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 1px rgba(255, 255, 255, 0.4));
+    /* Invisible during the grace delay (no backwards fill), then the sweep runs. */
+    opacity: 0;
+    animation: shapeHoldSweep var(--ring-sweep) linear var(--ring-delay) forwards;
+}
+
+@keyframes shapeHoldSweep {
+    from {
+        opacity: 1;
+        --shape-hold-angle: 0deg;
+    }
+
+    to {
+        opacity: 1;
+        --shape-hold-angle: 360deg;
+    }
 }
 
 @keyframes stampCanvasPop {
@@ -1592,21 +2172,24 @@ body {
     inset: 0;
     pointer-events: none;
     z-index: 8;
-    /* Grid lines via CSS overlay pattern (replaces 1px gap between grid cells). */
+    /* Grid lines via CSS overlay pattern (replaces 1px gap between grid cells).
+       Plain gradients: background-size already tiles them per cell. With
+       repeating-linear-gradient the inner 100% resolved against the tile,
+       collapsing the pattern into a solid 5%-white wash over the art. */
     background-image:
-        repeating-linear-gradient(
+        linear-gradient(
             90deg,
             var(--grid-line) 0px,
             var(--grid-line) 1px,
             transparent 1px,
-            transparent calc(100% / 32)
+            transparent 100%
         ),
-        repeating-linear-gradient(
+        linear-gradient(
             0deg,
             var(--grid-line) 0px,
             var(--grid-line) 1px,
             transparent 1px,
-            transparent calc(100% / 32)
+            transparent 100%
         );
     background-size: calc(100% / 32) calc(100% / 32);
 }

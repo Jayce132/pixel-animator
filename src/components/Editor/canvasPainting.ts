@@ -262,6 +262,27 @@ export function paintLayerPreview(
 }
 
 /**
+ * Paint the floating layer on top of an already-painted 32×32 canvas.
+ * Playback renders skip paintMainCanvas (no checkerboard, no dimming), but the
+ * floating stamp must stay visible so it can be aimed mid-playback.
+ */
+export function paintFloatingPixels(
+    ctx: CanvasRenderingContext2D,
+    floatingLayer: Map<number, FloatingLayerPixel>
+) {
+    for (const [index, color] of floatingLayer.entries()) {
+        const x = index % GRID_SIZE;
+        const y = Math.floor(index / GRID_SIZE);
+        if (color === null) {
+            drawEraserSwatchMarker(ctx, x, y, 1, 1);
+        } else {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, 1, 1);
+        }
+    }
+}
+
+/**
  * Paint only the floating layer for stamp feedback.
  * The committed copy remains on the main canvas while this transparent layer jumps.
  */

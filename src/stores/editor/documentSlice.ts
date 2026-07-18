@@ -1,5 +1,5 @@
 import { GRID_SIZE, PRESET_COLORS } from '../../types';
-import type { Sprite } from '../../types';
+import type { PixelData, Sprite } from '../../types';
 import { exportFrameToPNG, exportProjectToGIF, exportSpriteSheetToPNG } from '../../utils/export';
 import { decompressPixelData, exportSpritesToJSON, loadProjectJSON, saveProjectJSON } from '../../utils/save';
 import {
@@ -20,6 +20,7 @@ export type DocumentSlice = Pick<
     | 'commitHistory'
     | 'deleteSprite'
     | 'duplicateSprite'
+    | 'duplicateSprites'
     | 'exportFrame'
     | 'exportFrameJSON'
     | 'exportGIF'
@@ -34,6 +35,30 @@ export type DocumentSlice = Pick<
     | 'saveProject'
     | 'undo'
 >;
+
+// A duplicate copies only the layers currently visible for editing (both when
+// stacked, otherwise just the active layer) and inherits the source's undo
+// steps for those layers. A blanked layer instead gets blank snapshots of the
+// same depth: undo pops base and overlay history in lockstep, so the stacks
+// must stay equal length — undoing then walks only the inherited layer back
+// while the blank layer stays blank.
+const cloneSpriteAsDuplicate = (
+    source: Sprite,
+    id: number,
+    copiesBase: boolean,
+    copiesTop: boolean,
+    blank: PixelData
+): Sprite => ({
+    ...source,
+    id,
+    name: `${source.name} (Copy)`,
+    pixelData: clonePixelData(copiesBase ? source.pixelData : blank),
+    overlayPixelData: clonePixelData(copiesTop ? source.overlayPixelData : blank),
+    history: source.history.map(entry => clonePixelData(copiesBase ? entry : blank)),
+    redoHistory: [],
+    overlayHistory: source.overlayHistory.map(entry => clonePixelData(copiesTop ? entry : blank)),
+    overlayRedoHistory: []
+});
 
 export const createDocumentSlice = (
     set: EditorStoreSet,
@@ -153,27 +178,41 @@ export const createDocumentSlice = (
         const newId = Math.max(...sprites.map(s => s.id)) + 1;
         const blank = createBlankPixelData();
 
-        const nextBase = isOverlayStacked
-            ? clonePixelData(sourceSprite.pixelData)
-            : (activeLayer === 'base' ? clonePixelData(sourceSprite.pixelData) : clonePixelData(blank));
-        const nextTop = isOverlayStacked
-            ? clonePixelData(sourceSprite.overlayPixelData)
-            : (activeLayer === 'top' ? clonePixelData(sourceSprite.overlayPixelData) : clonePixelData(blank));
-
-        const newSprite: Sprite = {
-            ...sourceSprite,
-            id: newId,
-            name: `${sourceSprite.name} (Copy)`,
-            pixelData: nextBase,
-            overlayPixelData: nextTop,
-            // Start duplicated frames with fresh history to keep memory bounded.
-            history: [clonePixelData(nextBase)],
-            redoHistory: [],
-            overlayHistory: [clonePixelData(nextTop)],
-            overlayRedoHistory: []
-        };
+        const copiesBase = isOverlayStacked || activeLayer === 'base';
+        const copiesTop = isOverlayStacked || activeLayer === 'top';
+        const newSprite = cloneSpriteAsDuplicate(sourceSprite, newId, copiesBase, copiesTop, blank);
 
         set({ sprites: [...sprites, newSprite], activeSpriteId: newId });
+    },
+    duplicateSprites: (ids) => {
+        get().flushPendingPixelUpdates();
+        const { activeLayer, isOverlayStacked, sprites } = get();
+        const idSet = new Set(ids);
+        const sourceIndices = sprites
+            .map((sprite, index) => (idSet.has(sprite.id) ? index : -1))
+            .filter(index => index !== -1);
+        if (sourceIndices.length === 0) return [];
+        if (sprites.length + sourceIndices.length > 64) {
+            get().notify('Frame limit reached (64)');
+            return [];
+        }
+
+        const copiesBase = isOverlayStacked || activeLayer === 'base';
+        const copiesTop = isOverlayStacked || activeLayer === 'top';
+        const blank = createBlankPixelData();
+        let nextId = Math.max(...sprites.map(sprite => sprite.id)) + 1;
+        const copies = sourceIndices.map(index =>
+            cloneSpriteAsDuplicate(sprites[index], nextId++, copiesBase, copiesTop, blank)
+        );
+
+        // Copies land as one group right after the last selected frame so the
+        // originals stay together: 1 2 3 4 with 2+3 selected → 1 2 3 2' 3' 4.
+        const insertIndex = sourceIndices[sourceIndices.length - 1] + 1;
+        const nextSprites = [...sprites];
+        nextSprites.splice(insertIndex, 0, ...copies);
+
+        set({ sprites: nextSprites, activeSpriteId: copies[0].id });
+        return copies.map(copy => copy.id);
     },
     exportFrame: (projectName, layerMode) => {
         get().flushPendingPixelUpdates();
@@ -275,7 +314,15 @@ export const createDocumentSlice = (
         get().discardPendingPixelUpdates();
         try {
             const projectData = await loadProjectJSON(file);
-            const projectPalette = mergePalettes(projectData.palette, PRESET_COLORS);
+            // Use the saved palette as-is (capped) — merging PRESET_COLORS in
+            // would corrupt the preset section of projects saved with an
+            // applied template. Pre-1.1 files lack presetCount; their preset
+            // section was always the leading default colors.
+            const projectPalette = mergePalettes(projectData.palette);
+            const savedPresetCount = typeof projectData.presetCount === 'number'
+                ? projectData.presetCount
+                : PRESET_COLORS.length;
+            const presetCount = Math.max(1, Math.min(savedPresetCount, projectPalette.length));
 
             // Reconstruct Sprites
             const newSprites: Sprite[] = projectData.frames.map(frame => {
@@ -307,6 +354,7 @@ export const createDocumentSlice = (
                 projectName: projectData.name || 'my_project',
                 fps: projectData.fps || 8,
                 palette: projectPalette,
+                presetCount,
                 sprites: newSprites,
                 activeSpriteId: newSprites[0].id,
                 floatingLayer: new Map(),
@@ -367,8 +415,8 @@ export const createDocumentSlice = (
     },
     saveProject: (projectName) => {
         get().flushPendingPixelUpdates();
-        const { fps, palette, sprites } = get();
-        saveProjectJSON(projectName, sprites, fps, palette, GRID_SIZE);
+        const { fps, palette, presetCount, sprites } = get();
+        saveProjectJSON(projectName, sprites, fps, palette, presetCount, GRID_SIZE);
     },
     undo: () => {
         get().flushPendingPixelUpdates();

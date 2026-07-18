@@ -39,6 +39,8 @@ export interface ProjectJSON {
     height: number;
     fps: number;
     palette: string[];
+    /** Leading palette entries shown as preset slots. Absent in pre-1.1 files. */
+    presetCount?: number;
     frames: {
         id: number;
         name: string;
@@ -47,15 +49,16 @@ export interface ProjectJSON {
     }[];
 }
 
-export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, gridSize: number) => {
+export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, presetCount: number, gridSize: number) => {
     const projectData: ProjectJSON = {
         type: 'project',
-        version: '1.0',
+        version: '1.1',
         name: projectName,
         width: gridSize,
         height: gridSize,
         fps: fps,
         palette,
+        presetCount,
         frames: sprites.map(sprite => ({
             id: sprite.id,
             name: sprite.name,

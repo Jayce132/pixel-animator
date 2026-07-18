@@ -1,7 +1,8 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Settings } from 'lucide-react';
 import { useEditorUiStore } from '../../stores/editorStore';
 import { selectCanClear, selectCanRedo, selectCanUndo } from '../../stores/editorSelectors';
-import { PRESET_COLORS } from '../../types';
+import { PaletteSelector } from '../Sidebar/PaletteSelector';
 
 const MAX_RECENT = 8;
 type SwatchVars = React.CSSProperties & Record<'--swatch-color', string>;
@@ -22,6 +23,12 @@ export const TopBar: React.FC = () => {
     const currentColor = useEditorUiStore(state => state.currentColor);
     const setCurrentColor = useEditorUiStore(state => state.setCurrentColor);
     const recentColors = useEditorUiStore(state => state.recentColors);
+    const palette = useEditorUiStore(state => state.palette);
+    const presetCount = useEditorUiStore(state => state.presetCount);
+    const isPlaying = useEditorUiStore(state => state.isPlaying);
+    const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+
+    const presetColors = palette.slice(0, presetCount);
 
     const topBarRef = useRef<HTMLDivElement>(null);
     const hasRevealedToolsRef = useRef(recentColors.length > 0);
@@ -84,6 +91,7 @@ export const TopBar: React.FC = () => {
                     </button>
                     <button
                         className={`top-bar-btn ${currentTool === 'select' || selectedPixels.size > 0 ? 'active' : ''}`}
+                        disabled={isPlaying && selectedPixels.size === 0}
                         onClick={() => {
                             if (selectedPixels.size > 0) {
                                 clearSelection();
@@ -170,11 +178,20 @@ export const TopBar: React.FC = () => {
             {/* Divider */}
             <div className="top-bar-divider" />
 
-            {/* Palette Colors */}
+            {/* Palette Colors — gear opens the palette selector */}
             <div className="top-bar-colors">
-                {PRESET_COLORS.map((color) => (
+                <button
+                    type="button"
+                    className="top-bar-swatch palette-gear"
+                    onClick={() => setIsSelectorOpen(true)}
+                    title="Open palette selector"
+                    aria-label="Open palette selector"
+                >
+                    <Settings size={14} />
+                </button>
+                {presetColors.map((color, index) => (
                     <div
-                        key={color}
+                        key={`${index}-${color}`}
                         className={`top-bar-swatch has-color ${color === currentColor && currentTool !== 'eraser' && currentTool !== 'select' ? 'active' : ''}`}
                         style={{ '--swatch-color': color } as SwatchVars}
                         onClick={() => setCurrentColor(color)}
@@ -182,6 +199,8 @@ export const TopBar: React.FC = () => {
                     />
                 ))}
             </div>
+
+            {isSelectorOpen && <PaletteSelector onClose={() => setIsSelectorOpen(false)} />}
         </div>
     );
 };

@@ -11,9 +11,11 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
 - Smooth line interpolation while drawing fast
 
 ### Shape Assist (Brush)
-- Hold `Alt` (`Option` on macOS) during a stroke to preview/draw straight lines
-- Circle mode is available during the same shape flow
-- Shape previews render before commit; brush mode resumes on release
+- Draw a near-straight stroke and hold still (~0.6s) to snap it to a line
+- Draw a round loop back to your starting point and hold still to snap it to a circle
+- Scribbles and sketch strokes never snap — the hold only offers a shape when the stroke already resembles one
+- A countdown ring in your draw color shows the hold progress; works with touch
+- Shape previews render before commit; drag to adjust, release to paint
 
 ### Eyedropper Hold Mode
 - Long-press on canvas to activate eyedropper
@@ -63,6 +65,34 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
   - delete selected frames
 - Number-key navigation (`1..8`, `9`, `0`)
 - Mouse wheel vertical scroll maps to horizontal timeline scroll
+- FPS controls for playback speed
+- Up to 64 frames per project
+
+### Color and Palette
+- 32-color preset palette; colors picked outside it are added automatically (up to 255)
+- Palette selector with bundled Lospec templates (`palettes/*.hex`) and live
+  previews of your art in each candidate palette
+- Apply a template two ways: convert the art to the nearest colors
+  (perceptual OKLab matching) or keep the art's exact colors
+- Edit any palette entry's hex directly — pixels drawn with it recolor instantly
+- Import `.hex` files as custom templates (persisted locally) and download the
+  current palette as a Lospec-compatible `.hex` file
+- Recent colors strip
+- Pixel data is stored palette-indexed (`Uint8Array`) for compact saves
+
+### Save, Load, and Export
+- Save/load the full project as JSON (frames, layers, palette, FPS, project name)
+- Export options with per-layer modes (`merged`, `base`, `top`):
+  - Current frame or selected frames as PNG
+  - Sprite sheet PNG
+  - Animated GIF (via `gifenc`)
+  - Frames as JSON (re-importable)
+- Import multiple JSON frames; they splice in after the active frame
+
+### Mobile Support
+- Responsive layout with a dedicated mobile top bar and toolbar/timeline toggles
+- Touch-first timeline gestures: long-press paint-select, direction-gated drag
+  reordering, and edge auto-scroll
 
 ### Navigation and View Controls
 - Drag empty workspace area to pan
@@ -85,10 +115,14 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
 - Pixel-focused cursor/preview behavior for precision editing
 
 ## Tech Stack
-- React
+- React 19
 - TypeScript
 - Vite
+- zustand (editor state store)
 - dnd-kit (timeline drag/sort)
+- gifenc (GIF export)
+- mousetrap (keyboard shortcuts)
+- lucide-react (icons)
 
 ## Development
 

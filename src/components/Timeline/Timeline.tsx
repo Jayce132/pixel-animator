@@ -9,13 +9,10 @@ import { useTimelineActiveFrameScroll } from './useTimelineActiveFrameScroll';
 import { useTimelineDragHint } from './useTimelineDragHint';
 import { useTimelineKeyboardShortcuts } from './useTimelineKeyboardShortcuts';
 import { TIMELINE_SELECTION_LONG_PRESS_DELAY_MS, useTimelineTouch } from './useTimelineTouch';
-import { getSelectedSpritesInTimelineOrder } from './timelineSelection';
-import { TOTAL_PIXELS } from '../../types';
 import type { PixelData, Sprite } from '../../types';
 import { getCompositePixelData, getSpriteLayerPixels } from '../../utils/compositing';
 import { useEditorUiStore } from '../../stores/editorStore';
 import { selectActiveSprite } from '../../stores/editorSelectors';
-import { pixelDataToColorArray } from '../../utils/pixelData';
 import {
     DndContext,
     closestCenter,
@@ -46,7 +43,7 @@ export const Timeline: React.FC = () => {
     const moveSprite = useEditorUiStore(state => state.moveSprite);
     const moveSprites = useEditorUiStore(state => state.moveSprites);
     const setIsPlaying = useEditorUiStore(state => state.setIsPlaying);
-    const importMultipleFromJSON = useEditorUiStore(state => state.importMultipleFromJSON);
+    const duplicateSprites = useEditorUiStore(state => state.duplicateSprites);
     const isPlaying = useEditorUiStore(state => state.isPlaying);
     const isOnionSkinning = useEditorUiStore(state => state.isOnionSkinning);
     const setIsOnionSkinning = useEditorUiStore(state => state.setIsOnionSkinning);
@@ -137,34 +134,19 @@ export const Timeline: React.FC = () => {
     }, [selectedSpriteIds, deleteSprite, setSelectedSpriteIds]);
 
     const handleBulkDuplicate = React.useCallback(() => {
-        const selectedSprites = getSelectedSpritesInTimelineOrder(sprites, selectedSpriteIds);
+        // Store-side duplication clones the frames directly (inheriting each
+        // source's undo history) instead of round-tripping through the JSON
+        // import path, and inserts the copies after the last selected frame.
+        const newIds = duplicateSprites(Array.from(selectedSpriteIds));
 
-        if (selectedSprites.length === 0) return;
-
-        const blank = new Array(TOTAL_PIXELS).fill(null);
-        const importData = selectedSprites.map(s => ({
-            name: `${s.name} (Copy)`,
-            pixels: isOverlayStacked
-                ? pixelDataToColorArray(s.pixelData, palette)
-                : (activeLayer === 'base' ? pixelDataToColorArray(s.pixelData, palette) : blank),
-            overlayPixels: isOverlayStacked
-                ? pixelDataToColorArray(s.overlayPixelData, palette)
-                : (activeLayer === 'top' ? pixelDataToColorArray(s.overlayPixelData, palette) : blank)
-        }));
-
-        const newIds = importMultipleFromJSON(importData);
-        // Add new duplicates to existing selection
+        // Add new duplicates to existing selection; the store already made
+        // the first copy the active frame.
         setSelectedSpriteIds(prev => {
             const next = new Set(prev);
             newIds.forEach(id => next.add(id));
             return next;
         });
-
-        // Ensure the first of the duplications is the active frame
-        if (newIds.length > 0) {
-            setActiveSpriteId(newIds[0]);
-        }
-    }, [selectedSpriteIds, sprites, importMultipleFromJSON, setActiveSpriteId, activeLayer, isOverlayStacked, palette, setSelectedSpriteIds]);
+    }, [selectedSpriteIds, duplicateSprites, setSelectedSpriteIds]);
 
     const handleAddFrameMouseDown = React.useCallback(() => {
         setIsPlaying(false);

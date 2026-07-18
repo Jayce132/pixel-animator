@@ -15,8 +15,9 @@ import { selectActiveSprite } from '../../stores/editorSelectors';
 import { useEditorCursorStyles } from '../../hooks/useEditorCursorStyles';
 import { EYEDROPPER_HOLD_ANIMATION_MS, useEyedropperHold } from '../../hooks/useEyedropperHold';
 import { usePanZoom } from '../../hooks/usePanZoom';
-import { useShapeAssist } from '../../hooks/useShapeAssist';
+import { SHAPE_HOLD_RING_DELAY_MS, SHAPE_HOLD_RING_SWEEP_MS, useShapeAssist } from '../../hooks/useShapeAssist';
 import {
+    paintFloatingPixels,
     paintLayerPreview,
     paintMainCanvas,
     paintOverlayCanvas,
@@ -177,6 +178,7 @@ export const Editor: React.FC = () => {
         beginShapeStroke,
         circlePreviewSet,
         clearShapeHint,
+        shapeHoldIndex,
         commitActiveShape,
         handleShapePointerTargetChange,
         linePreviewSet,
@@ -188,7 +190,6 @@ export const Editor: React.FC = () => {
         currentTool,
         dragOriginRef,
         isDrawing,
-        isEyedropperActive,
         isPointerDownRef,
         selectedPixels
     });
@@ -285,6 +286,9 @@ export const Editor: React.FC = () => {
 
         if (currentTool === 'select') {
             if (!selectedPixels.has(index)) {
+                // No selecting mid-playback: keep the existing selection (its
+                // stamp stays usable) and never start a new lasso.
+                if (isPlaying) return;
                 if (selectedPixels.size > 0) {
                     clearSelection();
                 }
@@ -527,6 +531,9 @@ export const Editor: React.FC = () => {
                     ctx.fillRect(i % GRID_SIZE, Math.floor(i / GRID_SIZE), 1, 1);
                 }
             }
+            // The floating stamp still sits on top so it can be aimed while
+            // the animation plays underneath.
+            paintFloatingPixels(ctx, floatingLayer);
         } else {
             paintMainCanvas(ctx, displayPixels, floatingLayer, palette, selectedPixels, selectedPixels.size > 0);
         }
@@ -762,13 +769,6 @@ export const Editor: React.FC = () => {
 
     const editorSizeCss = `min(620px, 50vw, 70vh)`;
 
-    const shapeModifierLabel = React.useMemo(() => {
-        if (typeof navigator === 'undefined') return 'ALT';
-        const platform = navigator.platform || '';
-        const ua = navigator.userAgent || '';
-        const isApple = /Mac|iPhone|iPad|iPod/i.test(platform) || /Mac|iPhone|iPad|iPod/i.test(ua);
-        return isApple ? 'OPTION' : 'ALT';
-    }, []);
     const topStatusText = React.useMemo(() => {
         if (isEyedropperActive) return 'DROPPER TOOL';
         if (showDropperHint) return 'KEEP HOLDING STILL';
@@ -796,7 +796,7 @@ export const Editor: React.FC = () => {
         }
 
         if (shapeHintMode) {
-            return `PRESS ${shapeModifierLabel} TO SWITCH TO ${shapeHintMode.toUpperCase()}`;
+            return `HOLD STILL FOR ${shapeHintMode.toUpperCase()}`;
         }
         if (brushSize === 1) return 'MOUSE WHEEL TO ZOOM';
         return isOverlayStacked ? 'CURRENTLY DRAWING ON TOP LAYER' : (editingLayer === 'base' ? 'BASE' : 'TOP');
@@ -808,7 +808,6 @@ export const Editor: React.FC = () => {
         selectedPixels.size,
         dragOrigin,
         shapeHintMode,
-        shapeModifierLabel,
         brushSize,
         isOverlayStacked,
         editingLayer
@@ -953,6 +952,23 @@ export const Editor: React.FC = () => {
                                         />
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Shape hold countdown ring — keyed by cell so the sweep restarts on movement */}
+                        {shapeHoldIndex !== null && (
+                            <div className="shape-hold-overlay">
+                                <div
+                                    key={shapeHoldIndex}
+                                    className="shape-hold-ring"
+                                    style={{
+                                        '--ring-left': `${((shapeHoldIndex % GRID_SIZE) + 0.5) * (100 / GRID_SIZE)}%`,
+                                        '--ring-top': `${(Math.floor(shapeHoldIndex / GRID_SIZE) + 0.5) * (100 / GRID_SIZE)}%`,
+                                        '--ring-delay': `${SHAPE_HOLD_RING_DELAY_MS}ms`,
+                                        '--ring-sweep': `${SHAPE_HOLD_RING_SWEEP_MS}ms`,
+                                        '--ring-color': currentColor ?? '#ffffff'
+                                    } as React.CSSProperties}
+                                />
                             </div>
                         )}
                     </div>

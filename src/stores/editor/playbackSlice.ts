@@ -21,7 +21,10 @@ export const createPlaybackSlice = (
             return;
         }
 
-        set({ isPlaying: true });
+        // An armed select tool with nothing selected has no use mid-playback;
+        // an active selection keeps its tool so the stamp HUD works while playing.
+        const dropSelectTool = get().currentTool === 'select' && get().selectedPixels.size === 0;
+        set(dropSelectTool ? { isPlaying: true, currentTool: 'brush' } : { isPlaying: true });
 
         if (isPlaybackLoopRunning() || typeof requestAnimationFrame !== 'function') {
             return;

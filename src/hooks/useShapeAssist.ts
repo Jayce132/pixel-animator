@@ -3,6 +3,67 @@ import type { MutableRefObject } from 'react';
 import { getLinePixels } from '../utils/draw';
 import { GRID_SIZE } from '../types';
 import type { Tool } from '../types';
+import { EYEDROPPER_HOLD_MS } from './useEyedropperHold';
+
+// Holding still mid-stroke auto-activates shape assist (works on touch, where a
+// modifier key isn't available): a closed loop back to the start becomes a
+// circle, anything else becomes a straight line. Same delay as the eyedropper
+// hold so both hold-to-activate gestures feel identical.
+const SHAPE_HOLD_MS = EYEDROPPER_HOLD_MS;
+// Countdown ring visuals mirror the dropper hold pacing: a short grace period
+// so brief pauses while sketching don't flash the ring, then the sweep fills
+// the remainder of the hold.
+export const SHAPE_HOLD_RING_DELAY_MS = 120;
+export const SHAPE_HOLD_RING_SWEEP_MS = SHAPE_HOLD_MS - SHAPE_HOLD_RING_DELAY_MS;
+
+// A hold only offers a shape when the stroke plausibly IS that shape, so
+// scribble-filling or long sketch strokes never snap no matter how long the
+// pointer pauses. Lines: every path point within LINE_MAX_DEVIATION cells of
+// the start→end chord. Circles: closed loop whose points sit in a consistent
+// radius band around the centroid.
+const LINE_MAX_DEVIATION = 1.8;
+const CIRCLE_MIN_RADIUS = 1.5;
+const CIRCLE_MIN_PATH_CELLS = 8;
+
+const toXY = (idx: number) => ({ x: idx % GRID_SIZE, y: Math.floor(idx / GRID_SIZE) });
+
+const isStraightishPath = (path: number[]): boolean => {
+    if (path.length < 2) return false;
+    const s = toXY(path[0]);
+    const e = toXY(path[path.length - 1]);
+    const chord = Math.hypot(e.x - s.x, e.y - s.y);
+    if (chord < 1) return false;
+
+    return path.every((idx) => {
+        const p = toXY(idx);
+        const deviation = Math.abs((e.x - s.x) * (s.y - p.y) - (s.x - p.x) * (e.y - s.y)) / chord;
+        return deviation <= LINE_MAX_DEVIATION;
+    });
+};
+
+const isRoundishPath = (path: number[]): boolean => {
+    if (path.length < CIRCLE_MIN_PATH_CELLS) return false;
+
+    let sumX = 0;
+    let sumY = 0;
+    path.forEach((idx) => {
+        const p = toXY(idx);
+        sumX += p.x;
+        sumY += p.y;
+    });
+    const cx = sumX / path.length;
+    const cy = sumY / path.length;
+
+    const dists = path.map((idx) => {
+        const p = toXY(idx);
+        return Math.hypot(p.x - cx, p.y - cy);
+    });
+    const meanR = dists.reduce((sum, d) => sum + d, 0) / dists.length;
+    if (meanR < CIRCLE_MIN_RADIUS) return false;
+
+    const tolerance = Math.max(2, meanR * 0.35);
+    return dists.every((d) => Math.abs(d - meanR) <= tolerance);
+};
 
 type DragOrigin = 'inside' | 'outside' | null;
 type ShapeHintMode = 'line' | 'circle';
@@ -13,7 +74,6 @@ interface UseShapeAssistOptions {
     currentTool: Tool;
     dragOriginRef: MutableRefObject<DragOrigin>;
     isDrawing: boolean;
-    isEyedropperActive: boolean;
     isPointerDownRef: MutableRefObject<boolean>;
     selectedPixels: Set<number>;
 }
@@ -24,7 +84,6 @@ export const useShapeAssist = ({
     currentTool,
     dragOriginRef,
     isDrawing,
-    isEyedropperActive,
     isPointerDownRef,
     selectedPixels
 }: UseShapeAssistOptions) => {
@@ -33,12 +92,23 @@ export const useShapeAssist = ({
     const [shapeHintMode, setShapeHintMode] = useState<ShapeHintMode | null>(null);
     const strokeStartIndexRef = useRef<number | null>(null);
     const strokeEndIndexRef = useRef<number | null>(null);
+    const strokePathRef = useRef<number[]>([]);
     const hasMovedInStrokeRef = useRef(false);
     const hasLeftCircleDetonatorRef = useRef(false);
     const isLineModeActiveRef = useRef(false);
     const isCircleModeActiveRef = useRef(false);
-    const isAltPressedRef = useRef(false);
     const shapeHintModeRef = useRef<ShapeHintMode | null>(null);
+    const shapeHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Grid cell the shape hold is armed on; drives the countdown ring.
+    const [shapeHoldIndex, setShapeHoldIndex] = useState<number | null>(null);
+
+    const clearShapeHoldTimer = useCallback(() => {
+        if (shapeHoldTimerRef.current !== null) {
+            clearTimeout(shapeHoldTimerRef.current);
+            shapeHoldTimerRef.current = null;
+        }
+        setShapeHoldIndex(null);
+    }, []);
 
     const getCirclePixelsFromDiameter = useCallback((startIndex: number, endIndex: number): number[] => {
         const sx = startIndex % GRID_SIZE;
@@ -97,11 +167,13 @@ export const useShapeAssist = ({
         setLinePreviewPixels([]);
         setCirclePreviewPixels([]);
         clearShapeHint();
+        clearShapeHoldTimer();
         strokeStartIndexRef.current = null;
         strokeEndIndexRef.current = null;
+        strokePathRef.current = [];
         hasMovedInStrokeRef.current = false;
         hasLeftCircleDetonatorRef.current = false;
-    }, [clearShapeHint]);
+    }, [clearShapeHint, clearShapeHoldTimer]);
 
     const beginShapeStroke = useCallback((index: number) => {
         isLineModeActiveRef.current = false;
@@ -109,11 +181,13 @@ export const useShapeAssist = ({
         setLinePreviewPixels([]);
         setCirclePreviewPixels([]);
         clearShapeHint();
+        clearShapeHoldTimer();
         strokeStartIndexRef.current = index;
         strokeEndIndexRef.current = index;
+        strokePathRef.current = [index];
         hasMovedInStrokeRef.current = false;
         hasLeftCircleDetonatorRef.current = false;
-    }, [clearShapeHint]);
+    }, [clearShapeHint, clearShapeHoldTimer]);
 
     const handleShapePointerTargetChange = useCallback((index: number, onStrokeMoved: () => void) => {
         if (isCircleModeActiveRef.current) {
@@ -148,51 +222,70 @@ export const useShapeAssist = ({
         }
 
         strokeEndIndexRef.current = index;
+        const strokePath = strokePathRef.current;
+        if (strokePath[strokePath.length - 1] !== index) {
+            strokePath.push(index);
+        }
         const strokeStart = strokeStartIndexRef.current;
         if (strokeStart !== null && !isWithinCircleDetonator(strokeStart, index)) {
             hasLeftCircleDetonatorRef.current = true;
         }
 
+        // Shape hold: staying on the same grid cell for SHAPE_HOLD_MS activates
+        // shape assist, but only when the stroke plausibly is that shape — a
+        // near-round closed loop offers a circle, a near-straight stroke offers
+        // a line, and anything else (scribble fills, long sketch strokes) offers
+        // nothing. Any move to another cell lands back here and restarts the
+        // timer; the hint mirrors what a hold would produce.
+        let holdShape: ShapeHintMode | null = null;
         if (currentTool === 'brush' && hasMovedInStrokeRef.current && strokeStart !== null) {
-            const mode: ShapeHintMode =
-                hasLeftCircleDetonatorRef.current && isWithinCircleDetonator(strokeStart, index)
-                    ? 'circle'
-                    : 'line';
-            if (shapeHintModeRef.current !== mode) {
-                shapeHintModeRef.current = mode;
-                setShapeHintMode(mode);
+            const isLoopClosed = hasLeftCircleDetonatorRef.current && isWithinCircleDetonator(strokeStart, index);
+            if (isLoopClosed) {
+                holdShape = isRoundishPath(strokePath) ? 'circle' : null;
+            } else {
+                holdShape = isStraightishPath(strokePath) ? 'line' : null;
             }
         }
+        if (shapeHintModeRef.current !== holdShape) {
+            shapeHintModeRef.current = holdShape;
+            setShapeHintMode(holdShape);
+        }
 
-        if (isAltPressedRef.current && hasMovedInStrokeRef.current && currentTool === 'brush') {
-            if (!isLineModeActiveRef.current && !isCircleModeActiveRef.current) {
+        clearShapeHoldTimer();
+        if (holdShape !== null) {
+            const shapeToActivate = holdShape;
+            shapeHoldTimerRef.current = setTimeout(() => {
+                shapeHoldTimerRef.current = null;
+                setShapeHoldIndex(null);
+                if (!isPointerDownRef.current) return;
+                if (isLineModeActiveRef.current || isCircleModeActiveRef.current) return;
+                const start = strokeStartIndexRef.current;
+                const end = strokeEndIndexRef.current;
+                if (start === null || end === null) return;
+
                 cancelStroke();
-            }
-
-            if (strokeStart !== null && hasLeftCircleDetonatorRef.current && isWithinCircleDetonator(strokeStart, index)) {
-                isLineModeActiveRef.current = false;
-                isCircleModeActiveRef.current = true;
-                setLinePreviewPixels([]);
-                setCirclePreviewPixels(filterByDragOrigin(getCirclePixelsFromDiameter(strokeStart, index)));
-                return true;
-            }
-
-            if (strokeStart !== null) {
-                isCircleModeActiveRef.current = false;
-                isLineModeActiveRef.current = true;
-                setCirclePreviewPixels([]);
-                setLinePreviewPixels(filterByDragOrigin(getLinePixels(strokeStart, index)));
-                return true;
-            }
+                if (shapeToActivate === 'circle') {
+                    isCircleModeActiveRef.current = true;
+                    setLinePreviewPixels([]);
+                    setCirclePreviewPixels(filterByDragOrigin(getCirclePixelsFromDiameter(start, end)));
+                } else {
+                    isLineModeActiveRef.current = true;
+                    setCirclePreviewPixels([]);
+                    setLinePreviewPixels(filterByDragOrigin(getLinePixels(start, end)));
+                }
+            }, SHAPE_HOLD_MS);
+            setShapeHoldIndex(index);
         }
 
         return false;
     }, [
         cancelStroke,
+        clearShapeHoldTimer,
         currentTool,
         filterByDragOrigin,
         getCirclePixelsFromDiameter,
         isDrawing,
+        isPointerDownRef,
         isWithinCircleDetonator
     ]);
 
@@ -228,54 +321,8 @@ export const useShapeAssist = ({
         return false;
     }, [clearShapeHint, currentTool, filterByDragOrigin, getCirclePixelsFromDiameter]);
 
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key !== 'Alt') return;
-            isAltPressedRef.current = true;
-
-            if (!isPointerDownRef.current || !isDrawing || isEyedropperActive || currentTool !== 'brush') return;
-            const strokeStart = strokeStartIndexRef.current;
-            const strokeEnd = strokeEndIndexRef.current;
-            if (strokeStart === null || strokeEnd === null || !hasMovedInStrokeRef.current) return;
-
-            if (!isLineModeActiveRef.current && !isCircleModeActiveRef.current) {
-                cancelStroke();
-            }
-
-            if (hasLeftCircleDetonatorRef.current && isWithinCircleDetonator(strokeStart, strokeEnd)) {
-                isLineModeActiveRef.current = false;
-                isCircleModeActiveRef.current = true;
-                setLinePreviewPixels([]);
-                setCirclePreviewPixels(filterByDragOrigin(getCirclePixelsFromDiameter(strokeStart, strokeEnd)));
-                return;
-            }
-
-            isCircleModeActiveRef.current = false;
-            isLineModeActiveRef.current = true;
-            setCirclePreviewPixels([]);
-            setLinePreviewPixels(filterByDragOrigin(getLinePixels(strokeStart, strokeEnd)));
-        };
-
-        const onKeyUp = (e: KeyboardEvent) => {
-            if (e.key === 'Alt') isAltPressedRef.current = false;
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-        return () => {
-            window.removeEventListener('keydown', onKeyDown);
-            window.removeEventListener('keyup', onKeyUp);
-        };
-    }, [
-        cancelStroke,
-        currentTool,
-        filterByDragOrigin,
-        getCirclePixelsFromDiameter,
-        isDrawing,
-        isEyedropperActive,
-        isPointerDownRef,
-        isWithinCircleDetonator
-    ]);
+    // Clear any pending shape hold timer on unmount.
+    useEffect(() => clearShapeHoldTimer, [clearShapeHoldTimer]);
 
     const linePreviewSet = useMemo(() => {
         const preview = new Set<number>();
@@ -312,6 +359,7 @@ export const useShapeAssist = ({
     return {
         beginShapeStroke,
         circlePreviewSet,
+        shapeHoldIndex,
         clearShapeHint,
         commitActiveShape,
         handleShapePointerTargetChange,
