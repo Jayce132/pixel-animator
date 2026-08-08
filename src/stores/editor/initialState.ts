@@ -28,26 +28,34 @@ export type EditorStateValues = Pick<
     | 'sprites'
 >;
 
-export const createInitialEditorState = (): EditorStateValues => ({
-    activeActions: [],
-    activeLayer: 'base',
-    activeSpriteId: 0,
-    brushSize: 2,
-    currentColor: null,
-    currentTool: 'brush',
-    floatingLayer: new Map(),
-    fps: 8,
-    isOnionSkinning: false,
-    isOverlayStacked: true,
-    isDrawing: false,
-    isPlaying: false,
-    isStamping: false,
-    layerExportMode: 'merged',
-    notification: null,
-    palette: mergePalettes(PRESET_COLORS),
-    presetCount: PRESET_COLORS.length,
-    projectName: 'project_name',
-    recentColors: [],
-    selectedPixels: new Set(),
-    sprites: [createEmptySprite()]
-});
+export const createInitialEditorState = (): EditorStateValues => {
+    const initialSprite = createEmptySprite();
+    // The first preset color is picked automatically so the brush is ready
+    // immediately — the app no longer gates the canvas/timeline/toolbar
+    // behind an explicit "first pick" from the user.
+    const palette = mergePalettes(PRESET_COLORS);
+    const firstColor = palette[0] ?? null;
+    return {
+        activeActions: [],
+        activeLayer: 'base',
+        activeSpriteId: initialSprite.id,
+        brushSize: 2,
+        currentColor: firstColor,
+        currentTool: 'brush',
+        floatingLayer: new Map(),
+        fps: 8,
+        isOnionSkinning: false,
+        isOverlayStacked: true,
+        isDrawing: false,
+        isPlaying: false,
+        isStamping: false,
+        layerExportMode: 'merged',
+        notification: null,
+        palette,
+        presetCount: PRESET_COLORS.length,
+        projectName: 'project_name',
+        recentColors: firstColor ? [firstColor] : [],
+        selectedPixels: new Set(),
+        sprites: [initialSprite]
+    };
+};

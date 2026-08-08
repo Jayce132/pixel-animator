@@ -1,7 +1,13 @@
 import type { EditorStoreGet, EditorStoreSet, EditorUiState } from './types';
 import type { PixelData } from '../../types';
-import { clonePixelData, ensurePaletteColor, MAX_PALETTE_COLORS } from '../../utils/pixelData';
+import {
+    clonePixelData,
+    ensurePaletteColor,
+    MAX_ENCODED_COLORS,
+    MAX_PRESET_COLORS
+} from '../../utils/pixelData';
 import { nearestPaletteIndex } from '../../utils/palettes';
+import { getActiveCollabUndoController } from '../../collab/undoRuntime';
 
 export type UiSlice = Pick<
     EditorUiState,
@@ -34,7 +40,7 @@ export const createUiSlice = (
     applyPalette: (colors, mode) => {
         get().flushPendingPixelUpdates();
         set((state) => {
-            const nextColors = colors.slice(0, MAX_PALETTE_COLORS);
+            const nextColors = colors.slice(0, MAX_PRESET_COLORS);
             if (nextColors.length === 0) return {};
 
             const palette = [...nextColors];
@@ -50,7 +56,7 @@ export const createUiSlice = (
             }
 
             // Old palette value (1-based; 0 stays transparent) → new value.
-            const valueMap = new Uint8Array(state.palette.length + 1);
+            const valueMap = new Uint16Array(state.palette.length + 1);
             state.palette.forEach((oldColor, oldIndex) => {
                 if (mode === 'convert') {
                     valueMap[oldIndex + 1] = nearestPaletteIndex(oldColor, nextColors) + 1;
@@ -62,7 +68,7 @@ export const createUiSlice = (
                 if (
                     index === -1 &&
                     usedValues.has(oldIndex + 1) &&
-                    palette.length < MAX_PALETTE_COLORS
+                    palette.length < MAX_ENCODED_COLORS
                 ) {
                     palette.push(oldColor);
                     index = palette.length - 1;
@@ -176,8 +182,13 @@ export const createUiSlice = (
     })),
     setIsDrawing: (isDrawing) => {
         const wasDrawing = get().isDrawing;
+        const collabUndo = getActiveCollabUndoController();
+        if (isDrawing && !wasDrawing) {
+            collabUndo?.beginAction(get().activeSpriteId);
+        }
         if (!isDrawing) {
             get().flushPendingPixelUpdates();
+            collabUndo?.endAction(get().activeSpriteId);
         }
         set({ isDrawing });
         if (wasDrawing && !isDrawing) {

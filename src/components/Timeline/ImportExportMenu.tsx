@@ -4,8 +4,8 @@ import { selectActiveSprite } from '../../stores/editorSelectors';
 import { useEditorUiStore } from '../../stores/editorStore';
 
 interface ImportExportMenuProps {
-    selectedSpriteIds: Set<number>;
-    setSelectedSpriteIds: React.Dispatch<React.SetStateAction<Set<number>>>;
+    selectedSpriteIds: Set<string>;
+    setSelectedSpriteIds: React.Dispatch<React.SetStateAction<Set<string>>>;
     setIsSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
     hideImport?: boolean;
 }
@@ -46,7 +46,7 @@ export const ImportExportMenu: React.FC<ImportExportMenuProps> = ({
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
-        return () => window.removeEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     const toggleMenu = (menu: 'import' | 'export') => {
@@ -99,6 +99,35 @@ export const ImportExportMenu: React.FC<ImportExportMenuProps> = ({
         setOpenMenu(null);
     };
 
+    const handleLoadProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        try {
+            if (file) {
+                const { proposeWholesaleChange } = await import('../../collab/session');
+                const bytes = await file.arrayBuffer();
+                const digest = await crypto.subtle.digest('SHA-256', bytes);
+                const contentHash = Array.from(new Uint8Array(digest), byte => (
+                    byte.toString(16).padStart(2, '0')
+                )).join('');
+                const result = await proposeWholesaleChange('load-project', {
+                    fileName: file.name,
+                    fileSize: file.size,
+                    contentHash
+                });
+                if (result.approved) {
+                    await loadProject(file, { id: result.id, kind: 'load-project' });
+                } else {
+                    notify('Project replacement was not approved', 'info');
+                }
+            }
+        } catch (error) {
+            notify(error instanceof Error ? error.message : 'Could not load project');
+        } finally {
+            if (projectInputRef.current) projectInputRef.current.value = '';
+            setOpenMenu(null);
+        }
+    };
+
     return (
         <div ref={containerRef} className="import-export-menu">
             {/* Import Button & File Input */}
@@ -120,12 +149,7 @@ export const ImportExportMenu: React.FC<ImportExportMenuProps> = ({
                         accept=".json"
                         className="hidden-file-input"
                         ref={projectInputRef}
-                        onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) loadProject(file);
-                            if (projectInputRef.current) projectInputRef.current.value = '';
-                            setOpenMenu(null);
-                        }}
+                        onChange={(e) => { void handleLoadProject(e); }}
                     />
                     {openMenu === 'import' && (
                         <div className="import-export-dropdown">

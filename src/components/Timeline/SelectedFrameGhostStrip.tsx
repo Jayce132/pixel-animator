@@ -7,7 +7,7 @@ interface SelectedFrameGhostStripProps {
     getPreviewPixels: (sprite: Sprite) => PixelData;
     onDuplicate: () => void;
     palette: Palette;
-    selectedSpriteIds: Set<number>;
+    selectedSpriteIds: Set<string>;
     sprites: Sprite[];
 }
 

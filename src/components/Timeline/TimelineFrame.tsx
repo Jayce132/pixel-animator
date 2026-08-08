@@ -3,6 +3,7 @@ import { GRID_SIZE } from '../../types';
 import type { Palette, PixelData, Sprite } from '../../types';
 import { getCompositePixelData } from '../../utils/compositing';
 import { getPixelColor } from '../../utils/pixelData';
+import { useCollabStore } from '../../stores/collabStore';
 
 interface TimelineFrameProps {
     sprite: Sprite;
@@ -42,6 +43,8 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
     isGhost = false,
 }) => {
     const canvasRef = React.useRef<HTMLCanvasElement>(null);
+    const peers = useCollabStore(state => state.peers);
+    const presentPeers = isAdd ? [] : peers.filter(peer => peer.frameId === sprite.id);
 
     // Efficiently draw the frame to canvas whenever pixelData changes
     React.useEffect(() => {
@@ -121,6 +124,14 @@ export const TimelineFrame: React.FC<TimelineFrameProps> = React.memo(({
                 </div>
             ) : (
                 <div className="frame-number">{index + 1}</div>
+            )}
+
+            {presentPeers.length > 0 && (
+                <div className="timeline-presence" aria-label={`${presentPeers.length} collaborator present`}>
+                    {presentPeers.map(peer => (
+                        <span key={peer.clientId} style={{ backgroundColor: peer.color }} />
+                    ))}
+                </div>
             )}
 
         </div>

@@ -2,9 +2,46 @@ import type { Layer, Sprite } from '../../types';
 import type { SpriteLayerKey } from './types';
 import { MAX_HISTORY_ENTRIES } from './constants';
 import { clonePixelData, createBlankPixelData, pixelDataEquals } from '../../utils/pixelData';
+import { nanoid } from 'nanoid';
+
+export const generateSpriteId = (existingIds: Iterable<string>): string => {
+    const existing = new Set(existingIds);
+    let id = nanoid();
+    while (existing.has(id)) id = nanoid();
+    return id;
+};
+
+const isSafeSpriteId = (id: string): boolean => (
+    id.length > 0
+    && id.length <= 64
+    && !id.startsWith('__')
+    && /^[A-Za-z0-9_-]+$/.test(id)
+);
+
+export const normalizeLoadedSpriteId = (
+    savedId: string | number,
+    existingIds: Set<string>
+): string => {
+    const candidate = typeof savedId === 'number' && Number.isSafeInteger(savedId)
+        ? `legacy-${savedId}`
+        : typeof savedId === 'string'
+            ? savedId
+            : '';
+    if (isSafeSpriteId(candidate) && !existingIds.has(candidate)) return candidate;
+    return generateSpriteId(existingIds);
+};
+
+export const generateSpriteName = (sprites: Sprite[]): string => {
+    let highestSuffix = -1;
+    sprites.forEach(sprite => {
+        const match = /^Sprite (\d+)$/.exec(sprite.name);
+        if (match) highestSuffix = Math.max(highestSuffix, Number(match[1]));
+    });
+    return `Sprite ${highestSuffix + 1}`;
+};
 
 export const createEmptySprite = (): Sprite => ({
-    id: 0,
+    id: nanoid(),
     name: 'Sprite 0',
     pixelData: createBlankPixelData(),
     overlayPixelData: createBlankPixelData(),

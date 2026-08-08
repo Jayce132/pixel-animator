@@ -1,7 +1,8 @@
 import type { SetStateAction } from 'react';
 import type { StateCreator } from 'zustand';
-import type { EditorNotification, FloatingLayerPixel, Layer, NotificationTone, Palette, Sprite, Tool } from '../../types';
+import type { EditorNotification, FloatingLayerPixel, Layer, NotificationTone, Palette, PixelData, Sprite, Tool } from '../../types';
 import type { LayerExportMode } from '../../utils/export';
+import type { CollabWholesaleMarker } from '../../collab/actionContext';
 
 export type SpriteLayerKey = 'pixelData' | 'overlayPixelData';
 
@@ -9,7 +10,7 @@ export type SpriteLayerKey = 'pixelData' | 'overlayPixelData';
 export interface PaletteSnapshot {
     palette: Palette;
     presetCount: number;
-    layers: { id: number; pixelData: Uint8Array; overlayPixelData: Uint8Array }[];
+    layers: { id: string; pixelData: PixelData; overlayPixelData: PixelData }[];
 }
 
 export interface ImportedFrameFile {
@@ -21,7 +22,7 @@ export interface ImportedFrameFile {
 export interface EditorUiState {
     activeActions: string[];
     activeLayer: Layer;
-    activeSpriteId: number;
+    activeSpriteId: string;
     brushSize: 1 | 2;
     currentColor: string | null;
     currentTool: Tool;
@@ -49,10 +50,10 @@ export interface EditorUiState {
     clearCanvas: () => void;
     clearSelection: () => void;
     commitHistory: () => void;
-    deleteSprite: (id?: number) => void;
+    deleteSprite: (id?: string) => void;
     duplicateSprite: () => void;
     /** Duplicate the given frames (timeline order), inserting the copies after the last of them. Returns the new ids. */
-    duplicateSprites: (ids: number[]) => number[];
+    duplicateSprites: (ids: string[]) => string[];
     exportFrame: (projectName: string, layerMode: LayerExportMode) => void;
     exportFrameJSON: (projectName: string, layerMode: LayerExportMode) => void;
     exportGIF: (projectName: string, layerMode: LayerExportMode) => void;
@@ -64,9 +65,9 @@ export interface EditorUiState {
     discardPendingPixelUpdates: () => void;
     flipSelectionHorizontal: () => void;
     flipSelectionVertical: () => void;
-    importMultipleFromJSON: (files: ImportedFrameFile[]) => number[];
+    importMultipleFromJSON: (files: ImportedFrameFile[]) => string[];
     liftSelection: (pixelsOverride?: Set<number>) => void;
-    loadProject: (file: File) => Promise<void>;
+    loadProject: (file: File, collabMarker?: CollabWholesaleMarker) => Promise<void>;
     moveSprite: (oldIndex: number, newIndex: number) => void;
     moveSprites: (indices: number[], insertAtIndex: number, activeIndex?: number) => void;
     nudgeSelection: (dx: number, dy: number) => void;
@@ -78,7 +79,7 @@ export interface EditorUiState {
     undo: () => void;
     setActiveActions: (actions: string[]) => void;
     setActiveLayer: (layer: Layer) => void;
-    setActiveSpriteId: (id: SetStateAction<number>) => void;
+    setActiveSpriteId: (id: SetStateAction<string>) => void;
     setBrushSize: (size: 1 | 2) => void;
     setCurrentColor: (color: string | null) => void;
     setFps: (fps: SetStateAction<number>) => void;

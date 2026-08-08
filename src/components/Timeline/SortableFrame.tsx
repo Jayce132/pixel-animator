@@ -5,7 +5,7 @@ import { TimelineFrame } from './TimelineFrame';
 import type { Palette, PixelData, Sprite } from '../../types';
 
 interface SortableFrameProps {
-    id: number;
+    id: string;
     sprite: Sprite;
     index: number;
     isActive: boolean;

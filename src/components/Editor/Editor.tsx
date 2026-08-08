@@ -21,10 +21,14 @@ import {
     paintLayerPreview,
     paintMainCanvas,
     paintOverlayCanvas,
+    paintPeerSelectionOverlay,
     paintStampCanvas,
     syncCanvasBackingStore
 } from './canvasPainting';
 import { createBlankPixelData, getPixelColor, TRANSPARENT_PIXEL } from '../../utils/pixelData';
+import { PresenceCursors } from '../Collab/PresenceCursors';
+import { updateLocalCollabCursor } from '../../collab/presenceRuntime';
+import { useCollabStore } from '../../stores/collabStore';
 
 interface PointerCoords {
     clientX: number;
@@ -80,6 +84,11 @@ export const Editor: React.FC = () => {
     const isOnionSkinning = useEditorUiStore(state => state.isOnionSkinning);
     const sprites = useEditorUiStore(state => state.sprites);
     const activeSpriteId = useEditorUiStore(state => state.activeSpriteId);
+    // v1 collab sessions cap at one guest, so there's ever at most one peer
+    // whose selection could be relevant to the frame you're looking at.
+    const activePeerSelection = useCollabStore(state => (
+        state.peers.find(peer => peer.frameId === activeSpriteId) ?? null
+    ));
     const currentColor = useEditorUiStore(state => state.currentColor);
     const setCurrentColor = useEditorUiStore(state => state.setCurrentColor);
     const brushSize = useEditorUiStore(state => state.brushSize);
@@ -91,7 +100,6 @@ export const Editor: React.FC = () => {
     const isOverlayStacked = useEditorUiStore(state => state.isOverlayStacked);
     const setIsOverlayStacked = useEditorUiStore(state => state.setIsOverlayStacked);
     const palette = useEditorUiStore(state => state.palette);
-    const recentColors = useEditorUiStore(state => state.recentColors);
     const isStamping = useEditorUiStore(state => state.isStamping);
     const activeActions = useEditorUiStore(state => state.activeActions);
 
@@ -123,7 +131,6 @@ export const Editor: React.FC = () => {
     // Track last pixel for interpolation
     const lastPixelIndexRef = useRef<number | null>(null);
 
-    const hasPickedColor = recentColors.length > 0;
     const isNudging = activeActions.some(action => action === 'up' || action === 'down' || action === 'left' || action === 'right');
     const showStampAnimation = isStamping && floatingLayer.size > 0 && !isNudging && !isPlaying;
     const { cursorStyle, faintCursorStyle, selectionCursorStyle } = useEditorCursorStyles({
@@ -135,15 +142,34 @@ export const Editor: React.FC = () => {
     const isPointerDownRef = useRef(false);
     const activePointerIdRef = useRef<number | null>(null);
     const activeTargetIndexRef = useRef<number | null>(null);
+    const pendingPresenceCursorRef = useRef<{ x: number; y: number } | null>(null);
+    const presenceFrameRef = useRef<number | null>(null);
     const mouseHoverIndexRef = useRef<number | null>(null);
     const pendingFillPixelRef = useRef<number | null>(null);
     const workspaceRef = useRef<HTMLDivElement>(null);
     const stackButtonRef = useRef<HTMLButtonElement>(null);
 
+    const publishPresenceCursor = React.useCallback((index: number | null) => {
+        pendingPresenceCursorRef.current = index === null
+            ? null
+            : { x: index % GRID_SIZE, y: Math.floor(index / GRID_SIZE) };
+        if (presenceFrameRef.current !== null) return;
+        presenceFrameRef.current = window.requestAnimationFrame(() => {
+            presenceFrameRef.current = null;
+            updateLocalCollabCursor(pendingPresenceCursorRef.current);
+        });
+    }, []);
+
+    useEffect(() => () => {
+        if (presenceFrameRef.current !== null) window.cancelAnimationFrame(presenceFrameRef.current);
+        updateLocalCollabCursor(null);
+    }, []);
+
     // Canvas refs for editor rendering (replaces the old DOM pixel grid)
     const mainCanvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const stampCanvasRef = useRef<HTMLCanvasElement>(null);
+    const peerSelectionCanvasRef = useRef<HTMLCanvasElement>(null);
     const leftPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
     const rightPreviewCanvasRef = useRef<HTMLCanvasElement>(null);
     // Track hover index for canvas-based cursor highlight
@@ -439,6 +465,7 @@ export const Editor: React.FC = () => {
 
     const handlePointerLeave = (e: React.PointerEvent<HTMLDivElement>) => {
         if (e.pointerType !== 'mouse') return;
+        publishPresenceCursor(null);
         activeTargetIndexRef.current = null;
         clearMouseHoverState();
     };
@@ -575,6 +602,28 @@ export const Editor: React.FC = () => {
     }, [isPlaying, selectedPixels, linePreviewSet, circlePreviewSet,
         floatingLayer, currentColor, currentTool, onionSkinPixels, palette, hoverIndex, brushSize, isDrawing, overlayResizeTick]);
 
+    // Paint the peer's selection outline + in-progress drag, read-only —
+    // this never reads from or writes to the local selectedPixels/
+    // floatingLayer above, so it cannot affect this canvas's own editing.
+    useEffect(() => {
+        const canvas = peerSelectionCanvasRef.current;
+        if (!canvas) return;
+        syncCanvasBackingStore(canvas);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        if (isPlaying || !activePeerSelection) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        paintPeerSelectionOverlay(ctx, {
+            selectedPixels: activePeerSelection.selectedPixels,
+            floatingLayer: activePeerSelection.floatingLayer,
+            peerColor: activePeerSelection.color
+        });
+    }, [isPlaying, activePeerSelection, overlayResizeTick]);
+
     // Paint inactive layer preview canvas (unstacked mode)
     useEffect(() => {
         const canvas = editingLayer === 'top' ? leftPreviewCanvasRef.current : rightPreviewCanvasRef.current;
@@ -617,6 +666,9 @@ export const Editor: React.FC = () => {
         if (target.closest('.layer-preview')) return;
 
         const index = getGridIndexFromClientPoint(e.clientX, e.clientY);
+        if (pointerType === 'mouse' || isPointerDownRef.current) {
+            publishPresenceCursor(index);
+        }
         if (index === null) return;
 
         activePointerIdRef.current = e.pointerId;
@@ -650,6 +702,9 @@ export const Editor: React.FC = () => {
         }
 
         const index = getGridIndexFromClientPoint(e.clientX, e.clientY);
+        if (pointerType === 'mouse' || isPointerDownRef.current) {
+            publishPresenceCursor(index);
+        }
 
         if (index === null) {
             activeTargetIndexRef.current = null;
@@ -680,6 +735,7 @@ export const Editor: React.FC = () => {
 
     const handlePointerUp = (e: React.PointerEvent) => {
         const pointerType = e.pointerType as 'mouse' | 'touch' | 'pen';
+        if (pointerType === 'touch') publishPresenceCursor(null);
         if (pointerType === 'touch') {
             removeTouchPointer(e.pointerId);
             if (isGestureZooming()) {
@@ -750,6 +806,7 @@ export const Editor: React.FC = () => {
     };
 
     const handlePointerCancel = (e: React.PointerEvent) => {
+        if (e.pointerType === 'touch') publishPresenceCursor(null);
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
             e.currentTarget.releasePointerCapture(e.pointerId);
         }
@@ -835,14 +892,9 @@ export const Editor: React.FC = () => {
                     targetColor={eyedropperColor || null}
                 />
             )}
-            {!hasPickedColor && (
-                <div className="editor-empty-prompt">
-                    Select a color from the palette to begin
-                </div>
-            )}
             <div
                 ref={workspaceRef}
-                className={`editor-workspace ${hasPickedColor ? '' : 'is-hidden'}`}
+                className="editor-workspace"
                 style={{
                     '--editor-pan-x': `${panOffset.x}px`,
                     '--editor-pan-y': `${panOffset.y}px`,
@@ -867,7 +919,7 @@ export const Editor: React.FC = () => {
                         </div>
                     </div>
                 )}
-                <div className={`editor-main-column ${hasPickedColor ? 'editor-bounce-in' : ''}`}>
+                <div className="editor-main-column">
                     <div className="editor-layer-label is-active">
                         {topStatusText}
                     </div>
@@ -904,6 +956,16 @@ export const Editor: React.FC = () => {
                                 className="editor-canvas-layer editor-overlay-canvas"
                             />
                         )}
+                        {/* Read-only preview of the peer's selection/drag — never wired to local editing state */}
+                        {!isPlaying && (
+                            <canvas
+                                ref={peerSelectionCanvasRef}
+                                width={GRID_SIZE}
+                                height={GRID_SIZE}
+                                className="editor-canvas-layer editor-peer-selection-canvas"
+                            />
+                        )}
+                        <PresenceCursors />
 
                         {/* Dropper hold overlay — kept as DOM for CSS transitions */}
                         {dropperHoldOverlay && !isEyedropperActive && (

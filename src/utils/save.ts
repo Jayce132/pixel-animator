@@ -42,17 +42,16 @@ export interface ProjectJSON {
     /** Leading palette entries shown as preset slots. Absent in pre-1.1 files. */
     presetCount?: number;
     frames: {
-        id: number;
+        id: string | number;
         name: string;
         pixelData: (number | null)[];
         overlayPixelData: (number | null)[];
     }[];
 }
 
-export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, presetCount: number, gridSize: number) => {
-    const projectData: ProjectJSON = {
+export const createProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, presetCount: number, gridSize: number): ProjectJSON => ({
         type: 'project',
-        version: '1.1',
+        version: '1.2',
         name: projectName,
         width: gridSize,
         height: gridSize,
@@ -65,7 +64,10 @@ export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: num
             pixelData: compressPixelData(sprite.pixelData),
             overlayPixelData: compressPixelData(sprite.overlayPixelData)
         }))
-    };
+    });
+
+export const saveProjectJSON = (projectName: string, sprites: Sprite[], fps: number, palette: Palette, presetCount: number, gridSize: number) => {
+    const projectData = createProjectJSON(projectName, sprites, fps, palette, presetCount, gridSize);
 
     const jsonString = JSON.stringify(projectData, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });

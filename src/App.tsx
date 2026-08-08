@@ -8,7 +8,14 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ShortcutsPanel } from './components/ShortcutsPanel'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useEditorUiStore } from './stores/editorStore'
-import { selectCanClear, selectCanUndo } from './stores/editorSelectors'
+import { useCollabStore } from './stores/collabStore'
+import { InviteModal } from './components/Collab/InviteModal'
+import { JoinPrompt } from './components/Collab/JoinPrompt'
+import { CopyPrompt } from './components/Collab/CopyPrompt'
+import { ConsentPrompt } from './components/Collab/ConsentPrompt'
+import { ProposalPendingOverlay } from './components/Collab/ProposalPendingOverlay'
+import { parseCollabHash } from './collab/links'
+import type { CollabRoomLink } from './collab/links'
 import './index.css'
 
 const AppContent = () => {
@@ -17,21 +24,50 @@ const AppContent = () => {
     const [showSidebar, setShowSidebar] = useState(true);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [showTimeline, setShowTimeline] = useState(true);
+    const [showInvite, setShowInvite] = useState(false);
+    const [incomingRoom, setIncomingRoom] = useState<CollabRoomLink | null>(() => {
+        return parseCollabHash();
+    });
+    // Decided once, at mount: was there a "room=" hash that failed to parse?
+    // A genuinely malformed/unparseable link, not "incomingRoom later became
+    // null because the join succeeded" — see the effect below.
+    const [hashWasInvalidAtLoad] = useState<boolean>(() => (
+        window.location.hash.includes('room=') && !parseCollabHash()
+    ));
+    const isSessionActive = useCollabStore(state => state.isSessionActive);
+    const collabStatus = useCollabStore(state => state.status);
 
-    const sprites = useEditorUiStore(state => state.sprites);
-    const isDrawing = useEditorUiStore(state => state.isDrawing);
-    const canUndo = useEditorUiStore(selectCanUndo);
-    const canClear = useEditorUiStore(selectCanClear);
+    // Ambient session health on the Share toggle. A Host waiting for the
+    // room's first Guest is still healthy; amber is reserved for an actual
+    // degraded setup lifecycle. Established peer departure ends the session.
+    const shareIsHealthy = collabStatus === 'connected' || collabStatus === 'waiting-peer';
+    const shareStatusDot = isSessionActive
+        ? <span className={`share-status-dot ${shareIsHealthy ? '' : 'degraded'}`} aria-hidden="true" />
+        : null;
+
     const notification = useEditorUiStore(state => state.notification);
+    const notify = useEditorUiStore(state => state.notify);
     const clearNotification = useEditorUiStore(state => state.clearNotification);
     const discardPendingPixelUpdates = useEditorUiStore(state => state.discardPendingPixelUpdates);
-    const hasDrawn = canUndo || sprites.length > 1 || (canClear && !isDrawing);
 
     useEffect(() => {
         return () => {
             discardPendingPixelUpdates();
         };
     }, [discardPendingPixelUpdates]);
+
+    useEffect(() => {
+        // `incomingRoom` also transitions to null after a *successful* join/copy
+        // (JoinPrompt/CopyPrompt call onResolved), and the hash intentionally
+        // keeps "room=" afterward so a reload can rejoin — so this must not
+        // re-derive validity from incomingRoom's later state, only from what
+        // was actually true when the page loaded.
+        if (!hashWasInvalidAtLoad) return;
+        const url = new URL(window.location.href);
+        url.hash = '';
+        window.history.replaceState(null, '', url);
+        notify('Invalid collaboration link — your local project was not changed');
+    }, [hashWasInvalidAtLoad, notify]);
 
     const getViewToggleClassName = (active: boolean) => (
         `view-toggle ${active ? 'active' : ''}`
@@ -61,7 +97,7 @@ const AppContent = () => {
                 )}
 
                 {/* View Controls — desktop only */}
-                {hasDrawn && !isMobile && (
+                {!isMobile && (
                     <div className="view-controls">
                         <button onClick={() => setShowSidebar(!showSidebar)} className={getViewToggleClassName(showSidebar)}>
                             Toolbar
@@ -72,18 +108,24 @@ const AppContent = () => {
                         <button onClick={() => setShowTimeline(!showTimeline)} className={getViewToggleClassName(showTimeline)}>
                             Timeline
                         </button>
+                        <button onClick={() => setShowInvite(true)} className={getViewToggleClassName(isSessionActive)}>
+                            Share{shareStatusDot}
+                        </button>
                     </div>
                 )}
 
                 {/* Mobile: Top Bar + toggles */}
                 {isMobile && showSidebar && <TopBar />}
-                {hasDrawn && isMobile && (
+                {isMobile && (
                     <div className="mobile-toggles">
                         <button onClick={() => setShowSidebar(!showSidebar)} className={getViewToggleClassName(showSidebar)}>
                             Toolbar
                         </button>
                         <button onClick={() => setShowTimeline(!showTimeline)} className={getViewToggleClassName(showTimeline)}>
                             Timeline
+                        </button>
+                        <button onClick={() => setShowInvite(true)} className={getViewToggleClassName(isSessionActive)}>
+                            Share{shareStatusDot}
                         </button>
                     </div>
                 )}
@@ -94,10 +136,19 @@ const AppContent = () => {
 
                     <div className="canvas-area">
                         <Editor />
-                        {hasDrawn && <SelectionControls />}
-                        {hasDrawn && showTimeline && <Timeline />}
+                        <SelectionControls />
+                        {showTimeline && <Timeline />}
                     </div>
                 </div>
+                {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
+                {incomingRoom?.mode === 'live' && (
+                    <JoinPrompt room={incomingRoom} onResolved={() => setIncomingRoom(null)} />
+                )}
+                {incomingRoom?.mode === 'copy' && (
+                    <CopyPrompt room={incomingRoom} onResolved={() => setIncomingRoom(null)} />
+                )}
+                <ConsentPrompt />
+                <ProposalPendingOverlay />
             </main>
         </div>
     );

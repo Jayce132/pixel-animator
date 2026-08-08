@@ -306,3 +306,67 @@ export function paintStampCanvas(
         }
     }
 }
+
+/**
+ * Read-only preview of a peer's selection + in-progress drag, tinted with
+ * their identity color and dashed (never solid) so it's unmistakably "what
+ * they're doing," not real paint on your canvas. Never fed by or written
+ * back into local selectedPixels/floatingLayer — those drive real stamp/
+ * flip/rotate actions and must stay untouched by remote state.
+ */
+export function paintPeerSelectionOverlay(
+    ctx: CanvasRenderingContext2D,
+    options: {
+        selectedPixels: Set<number>;
+        floatingLayer: Map<number, string | null>;
+        peerColor: string;
+    }
+) {
+    const { selectedPixels, floatingLayer, peerColor } = options;
+    const canvasWidth = ctx.canvas.width;
+    const canvasHeight = ctx.canvas.height;
+    const cellWidth = canvasWidth / GRID_SIZE;
+    const cellHeight = canvasHeight / GRID_SIZE;
+    const pixelRatio = Math.max(1, canvasWidth / Math.max(1, ctx.canvas.clientWidth));
+    const strokeWidth = Math.max(1, Math.round(2 * pixelRatio));
+    const cellRect = (index: number) => ({
+        x: (index % GRID_SIZE) * cellWidth,
+        y: Math.floor(index / GRID_SIZE) * cellHeight
+    });
+
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    if (selectedPixels.size === 0 && floatingLayer.size === 0) return;
+
+    // Dragged pixels: their real color, translucent, so you see what's being
+    // moved without mistaking it for committed art.
+    if (floatingLayer.size > 0) {
+        ctx.globalAlpha = 0.55;
+        for (const [index, color] of floatingLayer.entries()) {
+            if (color === null) continue;
+            const { x, y } = cellRect(index);
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, cellWidth, cellHeight);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // Selection outline: dashed and peer-colored — never the app's own solid
+    // white selection stroke, so the two are never confused at a glance.
+    if (selectedPixels.size > 0) {
+        ctx.save();
+        ctx.strokeStyle = peerColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.setLineDash([strokeWidth * 1.5, strokeWidth * 1.5]);
+        for (const index of selectedPixels) {
+            const { x, y } = cellRect(index);
+            const inset = strokeWidth / 2;
+            ctx.strokeRect(
+                x + inset,
+                y + inset,
+                Math.max(0, cellWidth - strokeWidth),
+                Math.max(0, cellHeight - strokeWidth)
+            );
+        }
+        ctx.restore();
+    }
+}

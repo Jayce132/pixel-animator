@@ -44,6 +44,7 @@ export const Timeline: React.FC = () => {
     const moveSprites = useEditorUiStore(state => state.moveSprites);
     const setIsPlaying = useEditorUiStore(state => state.setIsPlaying);
     const duplicateSprites = useEditorUiStore(state => state.duplicateSprites);
+    const notify = useEditorUiStore(state => state.notify);
     const isPlaying = useEditorUiStore(state => state.isPlaying);
     const isOnionSkinning = useEditorUiStore(state => state.isOnionSkinning);
     const setIsOnionSkinning = useEditorUiStore(state => state.setIsOnionSkinning);
@@ -121,17 +122,61 @@ export const Timeline: React.FC = () => {
         // Selection is exclusively via long-press paint-select.
     }, []);
 
+    // Frame deletion is not undoable, so both delete paths (button and
+    // Shift+Del) are two-step: the first activation arms and warns via a
+    // toast, a second within the toast's lifetime actually deletes.
+    const DELETE_CONFIRM_WINDOW_MS = 3500; // matches the notification auto-dismiss
+    const [isDeleteArmed, setIsDeleteArmed] = React.useState(false);
+    const deleteArmTimerRef = React.useRef<number | null>(null);
+
+    const disarmDelete = React.useCallback(() => {
+        if (deleteArmTimerRef.current !== null) {
+            window.clearTimeout(deleteArmTimerRef.current);
+            deleteArmTimerRef.current = null;
+        }
+        setIsDeleteArmed(false);
+    }, []);
+
+    const armDelete = React.useCallback((message: string) => {
+        notify(message, 'info');
+        setIsDeleteArmed(true);
+        if (deleteArmTimerRef.current !== null) window.clearTimeout(deleteArmTimerRef.current);
+        deleteArmTimerRef.current = window.setTimeout(() => {
+            deleteArmTimerRef.current = null;
+            setIsDeleteArmed(false);
+        }, DELETE_CONFIRM_WINDOW_MS);
+    }, [notify]);
+
+    React.useEffect(() => {
+        // Changing the selection invalidates an armed confirmation (the
+        // cleanup also clears the pending timer on unmount).
+        return disarmDelete;
+    }, [selectedSpriteIds, disarmDelete]);
+
     const handleBulkDelete = React.useCallback(() => {
         if (selectedSpriteIds.size === 0) return;
+        if (!isDeleteArmed) {
+            const label = selectedSpriteIds.size > 1 ? `${selectedSpriteIds.size} frames` : 'this frame';
+            armDelete(`Deleting ${label} cannot be undone — delete again to confirm`);
+            return;
+        }
+        disarmDelete();
 
-        const idsToDelete = Array.from(selectedSpriteIds);
-
-        idsToDelete.forEach(id => {
+        Array.from(selectedSpriteIds).forEach(id => {
             deleteSprite(id);
         });
 
         setSelectedSpriteIds(new Set());
-    }, [selectedSpriteIds, deleteSprite, setSelectedSpriteIds]);
+    }, [selectedSpriteIds, isDeleteArmed, armDelete, disarmDelete, deleteSprite, setSelectedSpriteIds]);
+
+    const handleDeleteActiveFrame = React.useCallback(() => {
+        if (!isDeleteArmed) {
+            armDelete('Deleting this frame cannot be undone — press Shift+Del again to confirm');
+            return;
+        }
+        disarmDelete();
+        deleteSprite();
+    }, [isDeleteArmed, armDelete, disarmDelete, deleteSprite]);
 
     const handleBulkDuplicate = React.useCallback(() => {
         // Store-side duplication clones the frames directly (inheriting each
@@ -170,7 +215,7 @@ export const Timeline: React.FC = () => {
     useTimelineKeyboardShortcuts({
         batchSize: BATCH_SIZE,
         currentBatch,
-        deleteSprite,
+        deleteSprite: handleDeleteActiveFrame,
         duplicateSprite,
         handleBulkDelete,
         handleBulkDuplicate,
@@ -182,7 +227,7 @@ export const Timeline: React.FC = () => {
         spritesRef
     });
 
-    const [activeDragId, setActiveDragId] = React.useState<number | null>(null);
+    const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
@@ -214,7 +259,7 @@ export const Timeline: React.FC = () => {
         if (isPaintSelecting || touchDragBlocked) return;
 
         if (event.active.id !== undefined) {
-            const draggedId = Number(event.active.id);
+            const draggedId = String(event.active.id);
             setActiveDragId(draggedId);
             setActiveSpriteId(draggedId);
         }
@@ -223,7 +268,7 @@ export const Timeline: React.FC = () => {
     const handleDragOver = (event: DragOverEvent) => {
         const { over } = event;
         if (over) {
-            const overIndex = sprites.findIndex(s => s.id === Number(over.id));
+            const overIndex = sprites.findIndex(s => s.id === String(over.id));
             if (overIndex !== -1) {
                 const targetBatch = Math.floor(overIndex / BATCH_SIZE);
                 if (targetBatch !== currentBatch) {
@@ -243,8 +288,8 @@ export const Timeline: React.FC = () => {
         }, 500);
 
         if (over && active.id !== over.id) {
-            const activeId = Number(active.id);
-            const overId = Number(over.id);
+            const activeId = String(active.id);
+            const overId = String(over.id);
             const oldIndex = sprites.findIndex(s => s.id === activeId);
             const newIndex = sprites.findIndex(s => s.id === overId);
 
@@ -355,7 +400,9 @@ export const Timeline: React.FC = () => {
                                 className="control-btn-small delete-confirm"
                                 onClick={handleBulkDelete}
                             >
-                                Delete ({selectedSpriteIds.size})
+                                {isDeleteArmed
+                                    ? `Sure? Can't undo (${selectedSpriteIds.size})`
+                                    : `Delete (${selectedSpriteIds.size})`}
                             </button>
                         </>
                     )}

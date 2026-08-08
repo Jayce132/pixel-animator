@@ -14,18 +14,18 @@ interface UseTimelineTouchOptions {
     sprites: Sprite[];
     timelineContainerRef: React.RefObject<HTMLDivElement | null>;
     timelineRef: React.RefObject<HTMLDivElement | null>;
-    onFrameFocus?: (spriteId: number) => void;
+    onFrameFocus?: (spriteId: string) => void;
 }
 
 export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, onFrameFocus }: UseTimelineTouchOptions) {
     // ── Selection state ──
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
-    const [selectedSpriteIds, setSelectedSpriteIds] = React.useState<Set<number>>(new Set());
+    const [selectedSpriteIds, setSelectedSpriteIds] = React.useState<Set<string>>(new Set());
     const [touchDragBlocked, setTouchDragBlocked] = React.useState(false);
     const [isPaintSelecting, setIsPaintSelecting] = React.useState(false);
     const [isFramePointerDown, setIsFramePointerDown] = React.useState(false);
     // Visual-only affordance for the long-press timer; actual selection still happens in the timeout below.
-    const [selectionPendingSpriteId, setSelectionPendingSpriteId] = React.useState<number | null>(null);
+    const [selectionPendingSpriteId, setSelectionPendingSpriteId] = React.useState<string | null>(null);
 
     // ── Refs ──
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,8 +35,8 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
     const latestPointerPosRef = React.useRef<{ x: number; y: number } | null>(null);
     const isPointerDownRef = React.useRef(false);
     const isPaintSelectingRef = React.useRef(false);
-    const dragStartSpriteIdRef = React.useRef<number | null>(null);
-    const initialSelectedIdsRef = React.useRef<Set<number>>(new Set());
+    const dragStartSpriteIdRef = React.useRef<string | null>(null);
+    const initialSelectedIdsRef = React.useRef<Set<string>>(new Set());
     const targetSelectionStateRef = React.useRef<boolean>(true);
     const wasPaintSelectingRef = React.useRef(false);
 
@@ -262,7 +262,7 @@ export function useTimelineTouch({ sprites, timelineContainerRef, timelineRef, o
             if (frame) {
                 const idStr = frame.getAttribute('data-selectable-id');
                 if (idStr && dragStartSpriteIdRef.current !== null) {
-                    const currentId = parseInt(idStr, 10);
+                    const currentId = idStr;
                     const targetSprite = sprites.find(s => s.id === currentId);
                     if (!targetSprite) return;
 

@@ -2,8 +2,8 @@ import React from 'react';
 import type { Sprite } from '../../types';
 
 interface UseTimelineActiveFrameScrollOptions {
-    activeDragId: number | null;
-    activeSpriteId: number;
+    activeDragId: string | null;
+    activeSpriteId: string;
     batchSize: number;
     currentBatch: number;
     isDragCoolingDown: boolean;

@@ -2,12 +2,19 @@ import { TOTAL_PIXELS } from '../types';
 import type { Palette, PixelData } from '../types';
 
 export const TRANSPARENT_PIXEL = 0;
-export const MAX_PALETTE_COLORS = 255;
+/** UI cap: how many colors a preset palette (template/import) may define. */
+export const MAX_PRESET_COLORS = 255;
+/**
+ * Storage cap: how many distinct colors PixelData (Uint16Array) can encode.
+ * Collaboration can merge two peers' palettes, so the encoded space is much
+ * wider than any single palette the UI creates.
+ */
+export const MAX_ENCODED_COLORS = 65_535;
 
 const paletteIndexCache = new WeakMap<Palette, Map<string, number>>();
 
 export const createBlankPixelData = (length: number = TOTAL_PIXELS): PixelData => (
-    new Uint8Array(length)
+    new Uint16Array(length)
 );
 
 export const clonePixelData = (pixelData: PixelData): PixelData => pixelData.slice();
@@ -38,11 +45,11 @@ export const getPixelColor = (
 
 export const mergePalettes = (primary: Palette, secondary: Palette = []): Palette => {
     // Preserve primary palette positions because saved pixel data stores palette indices.
-    const nextPalette: Palette = primary.slice(0, MAX_PALETTE_COLORS);
+    const nextPalette: Palette = primary.slice(0, MAX_ENCODED_COLORS);
     const seen = new Set(nextPalette);
 
     secondary.forEach(color => {
-        if (!color || seen.has(color) || nextPalette.length >= MAX_PALETTE_COLORS) return;
+        if (!color || seen.has(color) || nextPalette.length >= MAX_ENCODED_COLORS) return;
         seen.add(color);
         nextPalette.push(color);
     });
@@ -75,8 +82,8 @@ export const ensurePaletteColor = (
         return { palette, value: existingValue };
     }
 
-    if (palette.length >= MAX_PALETTE_COLORS) {
-        return { palette, value: TRANSPARENT_PIXEL };
+    if (palette.length >= MAX_ENCODED_COLORS) {
+        throw new RangeError(`Cannot encode more than ${MAX_ENCODED_COLORS} colors`);
     }
 
     const nextPalette = [...palette, color];
@@ -110,3 +117,17 @@ export const pixelDataToColorArray = (
 ): (string | null)[] => (
     Array.from(pixelData, (_value, index) => getPixelColor(pixelData, index, palette))
 );
+
+/**
+ * Fields to merge in whenever a whole project is installed wholesale
+ * (collab join, copy receipt, local project load) instead of drawn locally.
+ * Re-selects the first color of the *newly received* palette, since it may
+ * differ from whatever the local user's palette/currentColor was before.
+ */
+export const wholesaleInstallRevealState = (palette: Palette): Pick<
+    import('../stores/editor/types').EditorUiState,
+    'currentColor' | 'recentColors'
+> => ({
+    currentColor: palette[0] ?? null,
+    recentColors: palette[0] ? [palette[0]] : []
+});

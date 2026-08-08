@@ -139,6 +139,257 @@ body {
     color: #ccc;
 }
 
+/* Peer-to-peer collaboration */
+
+/* Non-blocking proposer-side banner: drawing continues while the peer decides */
+.collab-pending-banner {
+    position: absolute;
+    top: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(440px, calc(100vw - 32px));
+    padding: 8px 10px 8px 12px;
+    color: var(--text-color);
+    background: rgba(38, 38, 38, 0.96);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+}
+
+.collab-pending-spinner {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    border: 2px solid var(--panel-border);
+    border-top-color: var(--accent-color);
+    border-radius: 50%;
+    animation: collabSpin 0.9s linear infinite;
+}
+
+@keyframes collabSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Session status dot on the Share view-toggle */
+.share-status-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 6px;
+    border-radius: 999px;
+    background: #55d6be;
+    box-shadow: 0 0 6px rgba(85, 214, 190, 0.8);
+    vertical-align: middle;
+}
+
+.share-status-dot.degraded {
+    background: #e8b34b;
+    box-shadow: 0 0 6px rgba(232, 179, 75, 0.8);
+}
+
+.collab-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(5, 7, 12, 0.72);
+    backdrop-filter: blur(4px);
+}
+
+.collab-modal {
+    width: min(420px, 100%);
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    color: var(--text-color, #ddd);
+    background: var(--panel-bg, #171923);
+    border: 1px solid var(--panel-border, #353849);
+    border-radius: 10px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.collab-modal h2,
+.collab-modal p {
+    margin: 0;
+}
+
+/* Small "which flow is this" label under a join/copy prompt's title, so the
+   two nearly-identical-looking dialogs (live session vs. one-shot copy)
+   read as distinct at a glance. */
+.collab-flow-badge {
+    align-self: flex-start;
+    margin-top: -6px;
+    padding: 2px 8px;
+    color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Visible progress row for connecting/joining/receiving states — a spinner
+   plus stage-accurate text, so "is anything happening?" has a clear answer. */
+.collab-connecting-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.collab-modal button:focus-visible,
+.collab-pending-banner button:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 1px;
+}
+
+.collab-modal-header,
+.collab-session-summary,
+.collab-modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.collab-modal-header {
+    justify-content: space-between;
+}
+
+.collab-modal-actions {
+    flex-wrap: wrap;
+}
+
+.collab-close {
+    border: 0;
+    padding: 2px 8px;
+    color: #aaa;
+    background: transparent;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.collab-peer-dot,
+.timeline-presence span {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+}
+
+.collab-session-summary > span:last-child {
+    margin-left: auto;
+    color: #8c91a6;
+    font-size: 0.75rem;
+}
+
+.collab-error {
+    color: #ff8b91;
+}
+
+.collab-fine-print {
+    color: #777d91;
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.collab-copy-offer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    color: #9fa5b8;
+    background: rgba(85, 214, 190, 0.08);
+    border: 1px solid rgba(85, 214, 190, 0.24);
+    border-radius: 6px;
+    font-size: 0.75rem;
+}
+
+.collab-palette-preview {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    overflow: hidden;
+    min-height: 36px;
+    border: 1px solid #343849;
+    border-radius: 5px;
+}
+
+.collab-palette-preview span {
+    min-height: 18px;
+}
+
+.collab-art-preview {
+    width: 160px;
+    height: 160px;
+    align-self: center;
+    background: #11131b;
+    border: 1px solid #343849;
+    border-radius: 5px;
+    image-rendering: pixelated;
+}
+
+.presence-cursors {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* The peer's cursor is the same tool art the local cursor shows — sized in
+   grid cells so it scales with editor size and zoom. Only the tag differs. */
+.presence-cursor {
+    position: absolute;
+    left: var(--presence-x);
+    top: var(--presence-y);
+    width: calc(var(--presence-cells) * 100% / 32);
+    transition: left 80ms linear, top 80ms linear;
+}
+
+.presence-cursor.is-centered {
+    transform: translate(-50%, -50%);
+}
+
+.presence-cursor-art {
+    display: block;
+    width: 100%;
+}
+
+.presence-cursor-tag {
+    position: absolute;
+    left: 85%;
+    top: 85%;
+    padding: 2px 4px;
+    color: #091014;
+    background: var(--presence-color);
+    border-radius: 3px;
+    font-size: 7px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.timeline-presence {
+    position: absolute;
+    right: 3px;
+    top: 3px;
+    z-index: 4;
+    display: flex;
+    gap: 2px;
+}
+
+.timeline-presence span {
+    display: block;
+}
+
 /* Workspace Grid */
 .workspace {
     flex: 1;
@@ -1978,75 +2229,11 @@ body {
 /* Main Sprite Editor */
 /* Merged into block above */
 
-/* Editor entrance animation */
-@keyframes editorBounceIn {
-    0% {
-        transform: translate(80vw, 150px) scale(0.1);
-        opacity: 0;
-    }
-
-    10% {
-        opacity: 1;
-    }
-
-    25% {
-        /* Peak of first huge bounce */
-        transform: translate(30vw, -100px) scale(0.5);
-    }
-
-    55% {
-        /* First landing (overshoot left) */
-        transform: translate(-30px, 0px) scale(1.05);
-    }
-
-    70% {
-        /* Peak of second bounce */
-        transform: translate(15px, -40px) scale(0.98);
-    }
-
-    85% {
-        /* Second landing */
-        transform: translate(-5px, 0px) scale(1.01);
-    }
-
-    93% {
-        /* Peak of tiny third bounce */
-        transform: translate(2px, -10px) scale(1);
-    }
-
-    100% {
-        /* Final rest at center */
-        transform: translate(0, 0) scale(1);
-    }
-}
-
-.editor-bounce-in {
-    /* Using linear easing or custom bézier so the path feels like gravity */
-    animation: editorBounceIn 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
-}
-
-.editor-empty-prompt {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    color: var(--text-muted);
-    font-size: 1.2rem;
-    font-weight: 600;
-    opacity: 0.5;
-    pointer-events: none;
-    text-align: center;
-    transform: translate(-50%, -50%);
-}
-
 .editor-workspace {
     display: flex;
     align-items: flex-start;
     transform: translate(var(--editor-pan-x), var(--editor-pan-y)) scale(var(--editor-zoom));
     transform-origin: center center;
-}
-
-.editor-workspace.is-hidden {
-    display: none;
 }
 
 .editor-layer-preview-column,
@@ -2136,6 +2323,10 @@ body {
 
 .editor-overlay-canvas {
     z-index: 10;
+}
+
+.editor-peer-selection-canvas {
+    z-index: 11;
 }
 
 .editor-stamp-canvas {

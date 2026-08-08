@@ -9,6 +9,7 @@ import {
     queuePixelUpdates
 } from './pixelBatching';
 import { getLayerKey } from './history';
+import { getActiveCollabUndoController } from '../../collab/undoRuntime';
 
 export type PixelSlice = Pick<
     EditorUiState,
@@ -25,6 +26,11 @@ export const createPixelSlice = (
     cancelStroke: () => {
         get().discardPendingPixelUpdates();
         const { activeSpriteId } = get();
+        const collabUndo = getActiveCollabUndoController();
+        if (collabUndo) {
+            collabUndo.cancelAction(activeSpriteId);
+            return;
+        }
 
         set((state) => ({
             sprites: state.sprites.map(sprite => {

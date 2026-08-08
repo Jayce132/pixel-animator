@@ -31,7 +31,6 @@ export const TopBar: React.FC = () => {
     const presetColors = palette.slice(0, presetCount);
 
     const topBarRef = useRef<HTMLDivElement>(null);
-    const hasRevealedToolsRef = useRef(recentColors.length > 0);
     const animationAbortedRef = useRef(false);
 
     useEffect(() => {
@@ -54,17 +53,6 @@ export const TopBar: React.FC = () => {
         };
         hintScroll();
     }, []);
-
-    useEffect(() => {
-        if (recentColors.length > 0 && !hasRevealedToolsRef.current) {
-            hasRevealedToolsRef.current = true;
-            if (topBarRef.current) {
-                requestAnimationFrame(() => {
-                    topBarRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
-                });
-            }
-        }
-    }, [recentColors.length]);
 
     const displaySlots = recentColors.length >= 4 ? MAX_RECENT : 4;
     const recentSlots = Array.from({ length: displaySlots });

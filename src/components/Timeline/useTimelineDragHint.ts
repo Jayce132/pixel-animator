@@ -9,10 +9,10 @@ interface TimelineDragHintPosition {
 }
 
 interface UseTimelineDragHintOptions {
-    activeDragId: number | null;
+    activeDragId: string | null;
     isPaintSelecting: boolean;
     isPlaying: boolean;
-    selectedSpriteIds: Set<number>;
+    selectedSpriteIds: Set<string>;
     sprites: Sprite[];
     timelineContainerRef: React.RefObject<HTMLDivElement | null>;
     timelineRef: React.RefObject<HTMLDivElement | null>;
@@ -27,10 +27,10 @@ export const useTimelineDragHint = ({
     timelineContainerRef,
     timelineRef
 }: UseTimelineDragHintOptions) => {
-    const [hoveredTimelineSpriteId, setHoveredTimelineSpriteId] = React.useState<number | null>(null);
+    const [hoveredTimelineSpriteId, setHoveredTimelineSpriteId] = React.useState<string | null>(null);
     const [dragHintPosition, setDragHintPosition] = React.useState<TimelineDragHintPosition | null>(null);
     const [isDragHintTimedOut, setIsDragHintTimedOut] = React.useState(false);
-    const pendingHoverSpriteIdRef = React.useRef<number | null>(null);
+    const pendingHoverSpriteIdRef = React.useRef<string | null>(null);
     const hoverDelayTimeoutRef = React.useRef<number | null>(null);
 
     const clearHoverDelay = React.useCallback(() => {

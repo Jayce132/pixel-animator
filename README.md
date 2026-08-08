@@ -69,7 +69,7 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
 - Up to 64 frames per project
 
 ### Color and Palette
-- 32-color preset palette; colors picked outside it are added automatically (up to 255)
+- Up to 255 preset colors; colors used by art are encoded in a wider 65,535-color space
 - Palette selector with bundled Lospec templates (`palettes/*.hex`) and live
   previews of your art in each candidate palette
 - Apply a template two ways: convert the art to the nearest colors
@@ -78,7 +78,17 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
 - Import `.hex` files as custom templates (persisted locally) and download the
   current palette as a Lospec-compatible `.hex` file
 - Recent colors strip
-- Pixel data is stored palette-indexed (`Uint8Array`) for compact saves
+- Pixel data is stored palette-indexed (`Uint16Array`) so merged peer palettes do not corrupt colors
+
+### Peer-to-Peer Collaboration
+- Share an encrypted live-room link with one Guest; no application backend owns the project
+- Per-pixel Yjs merging, independent frame navigation, colored canvas cursors, and timeline presence dots
+- Full local IndexedDB cache on each live peer, plus normal JSON saves as the durable portable copy
+- Collaborative undo affects only your own pixel actions on the active frame
+- Palette conversion and project replacement require the other peer's awareness-based approval
+- Either peer leaving ends the live room immediately; both keep the latest merged drawing as local projects
+- One-shot copy links use a separate immutable snapshot room, expire after 30 minutes, and detach after receipt
+- Public signaling is used by default; set `VITE_COLLAB_SIGNALING` to a comma-separated `ws://`/`wss://` list to override it
 
 ### Save, Load, and Export
 - Save/load the full project as JSON (frames, layers, palette, FPS, project name)
@@ -123,6 +133,8 @@ A browser-based pixel animation editor built with React + TypeScript + Vite.
 - gifenc (GIF export)
 - mousetrap (keyboard shortcuts)
 - lucide-react (icons)
+- Yjs, y-webrtc, and y-indexeddb (collaboration and peer persistence)
+- fractional-indexing and nanoid (convergent frame order and collision-safe ids)
 
 ## Development
 
@@ -144,4 +156,11 @@ npm run build
 ### Type Check
 ```bash
 npx tsc --noEmit
+```
+
+### Tests
+```bash
+npm test
+npm run test:e2e
+npm run lint
 ```

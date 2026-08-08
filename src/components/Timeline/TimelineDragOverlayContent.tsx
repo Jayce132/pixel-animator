@@ -4,11 +4,11 @@ import { getSelectedSpritesInTimelineOrder } from './timelineSelection';
 import type { Palette, PixelData, Sprite } from '../../types';
 
 interface TimelineDragOverlayContentProps {
-    activeDragId: number | null;
+    activeDragId: string | null;
     getPreviewPixels: (sprite: Sprite) => PixelData;
     isSelectionMode: boolean;
     palette: Palette;
-    selectedSpriteIds: Set<number>;
+    selectedSpriteIds: Set<string>;
     sprites: Sprite[];
 }
 

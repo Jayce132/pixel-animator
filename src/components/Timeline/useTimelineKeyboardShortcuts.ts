@@ -8,11 +8,11 @@ interface UseTimelineKeyboardShortcutsOptions {
     duplicateSprite: () => void;
     handleBulkDelete: () => void;
     handleBulkDuplicate: () => void;
-    selectedSpriteIds: Set<number>;
-    setActiveSpriteId: (id: number) => void;
+    selectedSpriteIds: Set<string>;
+    setActiveSpriteId: (id: string) => void;
     setCurrentBatch: React.Dispatch<React.SetStateAction<number>>;
     setIsSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
-    setSelectedSpriteIds: React.Dispatch<React.SetStateAction<Set<number>>>;
+    setSelectedSpriteIds: React.Dispatch<React.SetStateAction<Set<string>>>;
     spritesRef: React.MutableRefObject<Sprite[]>;
 }
 

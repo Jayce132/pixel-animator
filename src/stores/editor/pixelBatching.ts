@@ -4,7 +4,7 @@ import { clonePixelData } from '../../utils/pixelData';
 import type { EditorUiState, SpriteLayerKey } from './types';
 
 interface PendingLayerPixelBatch {
-    spriteId: number;
+    spriteId: string;
     layerKey: SpriteLayerKey;
     updates: Map<number, number>;
 }
@@ -63,7 +63,7 @@ export const getPendingPixelUpdatesState = (
     }
 
     if (layerBatches.length > 0) {
-        const batchesBySprite = new Map<number, PendingLayerPixelBatch[]>();
+        const batchesBySprite = new Map<string, PendingLayerPixelBatch[]>();
         layerBatches.forEach(batch => {
             const batches = batchesBySprite.get(batch.spriteId) ?? [];
             batches.push(batch);
@@ -112,7 +112,7 @@ export const discardQueuedPixelUpdates = () => {
 };
 
 export const queuePixelUpdates = (
-    spriteId: number,
+    spriteId: string,
     layerKey: SpriteLayerKey,
     layerUpdates: Map<number, number>,
     floatingUpdates: Map<number, FloatingLayerUpdate> | undefined,

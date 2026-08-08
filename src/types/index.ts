@@ -1,4 +1,4 @@
-export type PixelData = Uint8Array;
+export type PixelData = Uint16Array;
 export type Palette = string[];
 export type FloatingLayerPixel = string | null;
 export type FloatingLayerUpdate = FloatingLayerPixel | undefined;
@@ -6,7 +6,8 @@ export type Layer = 'base' | 'top';
 export type NotificationTone = 'error' | 'info';
 
 export interface Sprite {
-    id: number;
+    /** Collision-safe nanoid — opaque; display names never derive from it. */
+    id: string;
     name: string;
     pixelData: PixelData;
     overlayPixelData: PixelData;

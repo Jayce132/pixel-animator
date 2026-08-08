@@ -6,12 +6,23 @@ import {
     clonePixelData,
     colorArrayToPixelData,
     createBlankPixelData,
-    mergePalettes
+    mergePalettes,
+    wholesaleInstallRevealState
 } from '../../utils/pixelData';
 import type { EditorStoreGet, EditorStoreSet, EditorUiState } from './types';
-import { getLayerKey, pushHistoryForSprite, reorderSpriteSelection } from './history';
+import {
+    generateSpriteId,
+    generateSpriteName,
+    getLayerKey,
+    pushHistoryForSprite,
+    reorderSpriteSelection,
+    normalizeLoadedSpriteId
+} from './history';
 import { consumeDirtyFrameIds } from './sessionState';
 import { stopPlaybackLoop } from './playbackLoop';
+import { getActiveCollabUndoController } from '../../collab/undoRuntime';
+import { withCollabWholesaleAction } from '../../collab/actionContext';
+import { LOCAL_WHOLESALE_ORIGIN } from '../../collab/origins';
 
 export type DocumentSlice = Pick<
     EditorUiState,
@@ -44,7 +55,7 @@ export type DocumentSlice = Pick<
 // while the blank layer stays blank.
 const cloneSpriteAsDuplicate = (
     source: Sprite,
-    id: number,
+    id: string,
     copiesBase: boolean,
     copiesTop: boolean,
     blank: PixelData
@@ -72,12 +83,12 @@ export const createDocumentSlice = (
             return;
         }
 
-        const newId = sprites.length > 0 ? Math.max(...sprites.map(s => s.id)) + 1 : 0;
+        const newId = generateSpriteId(sprites.map(sprite => sprite.id));
         const basePixels = createBlankPixelData();
         const overlayPixels = createBlankPixelData();
         const newSprite: Sprite = {
             id: newId,
-            name: `Sprite ${newId}`,
+            name: generateSpriteName(sprites),
             pixelData: basePixels,
             overlayPixelData: overlayPixels,
             history: [clonePixelData(basePixels)],
@@ -110,6 +121,7 @@ export const createDocumentSlice = (
     },
     commitHistory: () => {
         get().flushPendingPixelUpdates();
+        if (getActiveCollabUndoController()) return;
         const frameIdsToCommit = consumeDirtyFrameIds(get().activeSpriteId);
 
         set((state) => {
@@ -175,7 +187,7 @@ export const createDocumentSlice = (
         if (activeIndex === -1) return;
 
         const sourceSprite = sprites[activeIndex];
-        const newId = Math.max(...sprites.map(s => s.id)) + 1;
+        const newId = generateSpriteId(sprites.map(sprite => sprite.id));
         const blank = createBlankPixelData();
 
         const copiesBase = isOverlayStacked || activeLayer === 'base';
@@ -200,10 +212,12 @@ export const createDocumentSlice = (
         const copiesBase = isOverlayStacked || activeLayer === 'base';
         const copiesTop = isOverlayStacked || activeLayer === 'top';
         const blank = createBlankPixelData();
-        let nextId = Math.max(...sprites.map(sprite => sprite.id)) + 1;
-        const copies = sourceIndices.map(index =>
-            cloneSpriteAsDuplicate(sprites[index], nextId++, copiesBase, copiesTop, blank)
-        );
+        const allocatedIds = new Set(sprites.map(sprite => sprite.id));
+        const copies = sourceIndices.map(index => {
+            const id = generateSpriteId(allocatedIds);
+            allocatedIds.add(id);
+            return cloneSpriteAsDuplicate(sprites[index], id, copiesBase, copiesTop, blank);
+        });
 
         // Copies land as one group right after the last selected frame so the
         // originals stay together: 1 2 3 4 with 2+3 selected → 1 2 3 2' 3' 4.
@@ -271,12 +285,12 @@ export const createDocumentSlice = (
         const nextSprites = [...sprites];
         const activeIndex = nextSprites.findIndex(sprite => sprite.id === activeSpriteId);
 
-        // Find highest ID to generate new ones
-        let maxId = Math.max(...nextSprites.map(sprite => sprite.id), -1);
+        const allocatedIds = new Set(nextSprites.map(sprite => sprite.id));
         let nextPalette = palette;
 
         const newSprites = files.map(file => {
-            maxId++;
+            const id = generateSpriteId(allocatedIds);
+            allocatedIds.add(id);
             const baseResult = colorArrayToPixelData(file.pixels, nextPalette);
             nextPalette = baseResult.palette;
             const overlayResult = file.overlayPixels
@@ -285,7 +299,7 @@ export const createDocumentSlice = (
             nextPalette = overlayResult.palette;
 
             return {
-                id: maxId,
+                id,
                 name: file.name || `Imported Frame`,
                 pixelData: baseResult.pixelData,
                 overlayPixelData: overlayResult.pixelData,
@@ -310,7 +324,7 @@ export const createDocumentSlice = (
         set({ sprites: updatedSprites, activeSpriteId: firstNewId, palette: nextPalette });
         return newSprites.map(sprite => sprite.id);
     },
-    loadProject: async (file) => {
+    loadProject: async (file, collabMarker) => {
         get().discardPendingPixelUpdates();
         try {
             const projectData = await loadProjectJSON(file);
@@ -325,6 +339,7 @@ export const createDocumentSlice = (
             const presetCount = Math.max(1, Math.min(savedPresetCount, projectPalette.length));
 
             // Reconstruct Sprites
+            const loadedIds = new Set<string>();
             const newSprites: Sprite[] = projectData.frames.map(frame => {
                 const pixelData = decompressPixelData(frame.pixelData, projectPalette);
                 // overlayPixelData was added recently, handle older files without it
@@ -332,8 +347,11 @@ export const createDocumentSlice = (
                     ? decompressPixelData(frame.overlayPixelData, projectPalette)
                     : createBlankPixelData();
 
+                const id = normalizeLoadedSpriteId(frame.id, loadedIds);
+                loadedIds.add(id);
+
                 return {
-                    id: frame.id,
+                    id,
                     name: frame.name,
                     pixelData,
                     overlayPixelData,
@@ -347,7 +365,7 @@ export const createDocumentSlice = (
             if (newSprites.length === 0) return;
 
             stopPlaybackLoop();
-            set({
+            const commitProject = () => set({
                 // Stop playing if it is
                 isPlaying: false,
                 // Update Name and FPS
@@ -358,8 +376,16 @@ export const createDocumentSlice = (
                 sprites: newSprites,
                 activeSpriteId: newSprites[0].id,
                 floatingLayer: new Map(),
-                selectedPixels: new Set()
+                selectedPixels: new Set(),
+                // Loaded content is already "revealed" — don't replay the
+                // first-launch intro (bounce-in, "pick a color to begin").
+                ...wholesaleInstallRevealState(projectPalette)
             });
+            if (collabMarker) {
+                withCollabWholesaleAction(LOCAL_WHOLESALE_ORIGIN, collabMarker, commitProject);
+            } else {
+                commitProject();
+            }
         } catch (error) {
             console.error("Failed to load project:", error);
             get().notify('Failed to load project. Ensure it is a valid project file.');
@@ -385,6 +411,11 @@ export const createDocumentSlice = (
     redo: () => {
         get().flushPendingPixelUpdates();
         const { activeSpriteId } = get();
+        const collabUndo = getActiveCollabUndoController();
+        if (collabUndo) {
+            collabUndo.redo(activeSpriteId);
+            return;
+        }
 
         set((state) => ({
             sprites: state.sprites.map(sprite => {
@@ -421,6 +452,11 @@ export const createDocumentSlice = (
     undo: () => {
         get().flushPendingPixelUpdates();
         const { activeSpriteId } = get();
+        const collabUndo = getActiveCollabUndoController();
+        if (collabUndo) {
+            collabUndo.undo(activeSpriteId);
+            return;
+        }
 
         set((state) => ({
             sprites: state.sprites.map(sprite => {

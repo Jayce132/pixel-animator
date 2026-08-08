@@ -14,10 +14,11 @@ import {
 } from '../../utils/palettes';
 import type { PresetPalette } from '../../utils/palettes';
 import { getCompositePixelData } from '../../utils/compositing';
-import { getPixelColor, MAX_PALETTE_COLORS } from '../../utils/pixelData';
+import { getPixelColor, MAX_PRESET_COLORS } from '../../utils/pixelData';
 import { GRID_SIZE } from '../../types';
 import type { Palette, PixelData, Sprite } from '../../types';
 import type { PaletteSnapshot } from '../../stores/editor/types';
+import { useCollabStore } from '../../stores/collabStore';
 
 type SwatchVars = React.CSSProperties & Record<'--swatch-color', string>;
 
@@ -116,6 +117,7 @@ const FrameThumb: React.FC<FrameThumbProps> = ({ sprite, palette, index, isActiv
 };
 
 export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => {
+    const isSessionActive = useCollabStore(state => state.isSessionActive);
     const palette = useEditorUiStore(state => state.palette);
     const presetCount = useEditorUiStore(state => state.presetCount);
     const setPaletteColor = useEditorUiStore(state => state.setPaletteColor);
@@ -248,8 +250,8 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
         });
         // Pixel bytes reserve 0 for transparency, so a palette holds at most
         // 255 colors — drop pasted lines beyond that up front.
-        setWasCapped(lines.length > MAX_PALETTE_COLORS);
-        const capped = lines.slice(0, MAX_PALETTE_COLORS);
+        setWasCapped(lines.length > MAX_PRESET_COLORS);
+        const capped = lines.slice(0, MAX_PRESET_COLORS);
         setDraft(capped.join('\n'));
 
         // After the re-chunk renders: undo any horizontal scroll the paste
@@ -301,15 +303,30 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
 
     const confirmSlotSwap = () => {
         if (pending?.kind !== 'slots') return;
-        pushSnapshot();
+        if (!isSessionActive) pushSnapshot();
         pending.changes.forEach(({ index, color }) => setPaletteColor(index, color));
         setPending(null);
     };
 
-    const confirmApply = (mode: 'convert' | 'keep') => {
+    const confirmApply = async (mode: 'convert' | 'keep') => {
         if (pending?.kind !== 'palette') return;
-        pushSnapshot();
-        applyPalette(pending.colors, mode);
+        if (mode === 'convert') {
+            const {
+                applyApprovedWholesale,
+                proposeWholesaleChange
+            } = await import('../../collab/session');
+            const result = await proposeWholesaleChange('palette-convert', {
+                colors: pending.colors
+            });
+            if (!result.approved) return;
+            if (!isSessionActive) pushSnapshot();
+            applyApprovedWholesale(result, 'palette-convert', () => {
+                applyPalette(pending.colors, mode);
+            });
+        } else {
+            if (!isSessionActive) pushSnapshot();
+            applyPalette(pending.colors, mode);
+        }
         setPending(null);
     };
 
@@ -404,7 +421,7 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
                 return;
             }
             const name = file.name.replace(/\.hex$/i, '').trim();
-            addCustomPalette(colors.slice(0, MAX_PALETTE_COLORS), name || undefined);
+            addCustomPalette(colors.slice(0, MAX_PRESET_COLORS), name || undefined);
         } catch {
             showImportError(`Could not read ${file.name}`);
         }
@@ -515,7 +532,7 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
                         type="button"
                         className="secondary-btn-small palette-undo-btn"
                         onClick={handleUndo}
-                        disabled={undoStack.length === 0}
+                        disabled={isSessionActive || undoStack.length === 0}
                     >
                         <RotateCcw size={12} />
                         Undo palette change
@@ -568,7 +585,7 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
                         </div>
                         {wasCapped && (
                             <div className="palette-cap-note">
-                                Palette limit is {MAX_PALETTE_COLORS} colors — extra lines were dropped
+                                Palette limit is {MAX_PRESET_COLORS} colors — extra lines were dropped
                             </div>
                         )}
                         <div className="palette-column-actions">
@@ -607,7 +624,7 @@ export const PaletteSelector: React.FC<PaletteSelectorProps> = ({ onClose }) => 
                             <div className="palette-hints-group">
                                 <div className="palette-hints-heading">Current</div>
                                 <p>Edit a line to swap that exact color everywhere it's painted — you confirm first.</p>
-                                <p>Paste any hex list to convert to it — one code per line, # optional, up to {MAX_PALETTE_COLORS} colors.</p>
+                                <p>Paste any hex list to convert to it — one code per line, # optional, up to {MAX_PRESET_COLORS} colors.</p>
                             </div>
                             <div className="palette-hints-group">
                                 <div className="palette-hints-heading">.hex files</div>
